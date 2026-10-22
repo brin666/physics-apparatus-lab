@@ -1,0 +1,32 @@
+{
+  "name": "physics-apparatus-lab",
+  "description": "Interactive 3D physics teaching apparatus / 物理器械室",
+  "license": "MIT",
+  "author": "brin666",
+  "homepage": "https://brin666.github.io/physics-apparatus-lab/",
+  "repository": {"type": "git", "url": "https://github.com/brin666/physics-apparatus-lab.git"},
+  "engines": {"node": ">=22"},
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "build:pages": "node build.mjs && node scripts/stage-pages.mjs",
+    "start": "node server.mjs",
+    "test": "node --test model.test.mjs assembly-model.test.mjs whiteboard-store.test.mjs refrigeration-model.test.mjs apparatus/*.test.mjs",
+    "qa": "node qa/redesign-browser.mjs",
+    "qa:home": "node qa/map-browser.mjs",
+    "qa:home-motion": "node qa/home-motion-browser.mjs",
+    "qa:assembly": "node qa/redesign-browser.mjs",
+    "qa:cooling": "node qa/cooling-explore-browser.mjs",
+    "qa:map": "node qa/map-browser.mjs",
+    "qa:apparatus": "node qa/apparatus-browser.mjs"
+  },
+  "dependencies": {
+    "three": "0.170.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12",
+    "playwright": "1.56.1"
+  }
+}

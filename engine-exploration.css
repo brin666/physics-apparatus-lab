@@ -1,0 +1,18 @@
+.exploration-tools{position:absolute;left:22px;top:65px;z-index:2;display:flex;align-items:center;gap:14px;color:#63748a;font-size:12px;animation:explore-enter 200ms ease-out both}
+.exploration-tools>div{display:flex;gap:2px;padding:3px;border:1px solid #dce3ec;border-radius:9px;background:#ffffffed;box-shadow:0 3px 12px #22334a06}
+.exploration-tools button{padding:7px 10px;border-radius:6px;font-size:12px}
+.exploration-tools button[aria-pressed=true]{background:#e7effe;color:#254d91}
+.exploration-tools #part-reset{border-left:1px solid #e3e9f1;border-radius:0 6px 6px 0;color:#65778d}
+body.is-exploring .playback-speed{display:none}
+body.is-exploring .current-caption p{white-space:normal}
+@keyframes explore-enter{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
+@media(max-width:600px){.exploration-tools{left:12px;right:12px;top:57px;justify-content:center;gap:6px}.exploration-tools>span{display:none}.exploration-tools button{padding:8px 12px}}
+@media(prefers-reduced-motion:reduce){.exploration-tools{animation:none}}
+
+.part-inspector{position:absolute;left:22px;top:118px;z-index:2;display:flex;align-items:flex-start;gap:18px;max-width:250px;min-width:190px;padding:15px 14px 15px 17px;border:1px solid #dce4ee;border-radius:12px;background:#fff;box-shadow:0 6px 22px #263c5810;animation:explore-enter 180ms ease-out both}
+.part-inspector h3{margin:0 0 7px;font-size:16px;font-weight:650;line-height:1.4;color:#26394f}
+.part-inspector p{margin:0;font-size:12px;line-height:1.6;color:#6a7c91}
+#inspector-close{flex:none;margin:-5px -5px 0 auto;padding:2px;width:26px;height:26px;border-radius:6px;font-size:20px;line-height:1;color:#96a3b3}
+#inspector-close:hover{color:#315e9c;background:#f0f5fc}
+@media(max-width:600px){.part-inspector{top:auto;bottom:84px;left:12px;min-width:170px;max-width:calc(100% - 24px);padding:12px 13px}.part-inspector h3{font-size:14px;margin-bottom:4px}.part-inspector p{font-size:11px}}
+@media(prefers-reduced-motion:reduce){.part-inspector{animation:none}}

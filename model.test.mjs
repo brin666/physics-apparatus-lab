@@ -1,0 +1,10 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {ENGINE,engineAt} from './model.mjs';
+const near=(a,b,e=1e-10)=>assert.ok(Math.abs(a-b)<e,`${a} != ${b}`);
+test('dead centres and one four-stroke cycle',()=>{for(const a of [0,360,720])near(engineAt(a).pistonCrownY,.284);for(const a of [180,540])near(engineAt(a).pistonCrownY,.212);assert.deepEqual([90,270,450,630].map(a=>engineAt(a).strokeId),['intake','compression','power','exhaust']);assert.equal(engineAt(720).strokeId,'intake');});
+test('slider-crank joints stay connected, rod and crank lengths stay fixed',()=>{for(let a=0;a<=720;a+=.5){const s=engineAt(a);near(Math.hypot(s.crankX,s.crankY-ENGINE.crankY),ENGINE.r);near(Math.hypot(s.crankX,s.pistonPinY-s.crankY),ENGINE.rod);assert.ok(s.volumeCm3>0);near(s.pistonCrownY-s.pistonPinY,ENGINE.pinToCrown);assert.ok(s.pistonCrownY<ENGINE.headY);}});
+test('no valve overlap and sealed compression/power strokes',()=>{for(let a=0;a<720;a+=.5){const s=engineAt(a);assert.ok(!(s.intakeLift>0&&s.exhaustLift>0));if(a>=180&&a<540)near(s.intakeLift+s.exhaustLift,0);assert.ok(s.intakeLift<=.005&&s.exhaustLift<=.005);}});
+test('ignition occurs once per 720 degrees, mechanism repeats after 360',()=>{for(let a=0;a<720;a++){const s=engineAt(a);assert.equal(s.spark>0,a>=360&&a<372);near(s.pistonPinY,engineAt(a+360).pistonPinY);}assert.equal(engineAt(0).spark,0);assert.equal(engineAt(360).spark,1);});
+test('piston direction and valve-piston clearance',()=>{for(let a=.1;a<720;a+=.5){const s=engineAt(a),next=engineAt(a+.01);const down=s.strokeIndex===0||s.strokeIndex===2;if(Math.abs(Math.sin(s.rad))>1e-4)assert.equal(next.pistonPinY<s.pistonPinY,down);const lowerValve=.293-Math.max(s.intakeLift,s.exhaustLift);assert.ok(lowerValve>s.pistonCrownY);}});
+test('scrubbing is deterministic and angles wrap safely',()=>{assert.deepEqual(engineAt(450),engineAt(450));assert.deepEqual(engineAt(-90),engineAt(630));near(engineAt(1000000).pistonCrownY,engineAt(1000000%720).pistonCrownY);assert.equal(engineAt(NaN).angle,0);for(const a of [0,180,360,540,720])assert.equal(engineAt(a).direction,'止点瞬间');});

@@ -1,0 +1,12 @@
+import {build} from 'esbuild';
+import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
+const bundle=async(entry)=>{const r=await build({entryPoints:[entry],bundle:true,write:false,format:'iife',target:'es2022',minify:true,legalComments:'inline'});return r.outputFiles[0].text;};
+const scriptSafe=s=>s.replace(/<\/script/gi,'<\\/script');
+const js3=await bundle('machine-scene.mjs');
+let machine=readFileSync('machine.html','utf8').replace(/<script\s+type=["']importmap["'][\s\S]*?<\/script>/gi,'').replace(/<script\s+(?:type=["']module["']\s+src=["'][^"']+["']|src=["'][^"']+["']\s+type=["']module["'])[^>]*>\s*<\/script>/gi,()=>`<script>${scriptSafe(js3)}</script>`);
+if(machine.includes('src="./machine-scene.mjs"'))throw Error('Machine entry was not inlined');
+const app=await bundle('app.mjs');
+const css=readFileSync('style.css','utf8');
+let html=readFileSync('index.source.html','utf8').replace('<link rel="stylesheet" href="./style.css">',()=>`<style>${css}</style>`).replace('<script type="module" src="./app.mjs"></script>',()=>`<script>window.MACHINE_DOCUMENT=${JSON.stringify(machine).replace(/</g,'\\u003c')};</script><script>${scriptSafe(app)}</script>`);
+writeFileSync('index.html',html);writeFileSync('machine-built.html',machine);mkdirSync('qa',{recursive:true});
+console.log(`Built offline index.html (${(Buffer.byteLength(html)/1024/1024).toFixed(2)} MB), machine-built.html`);

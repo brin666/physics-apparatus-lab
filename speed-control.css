@@ -1,0 +1,228 @@
+.speed-control.playback-speed {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: none;
+  width: 112px;
+  min-width: 0;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--control-line, #c6d7f5);
+  border-radius: 9px;
+  background: var(--control-surface, #f7faff);
+  color: var(--control-ink, #254d91);
+  box-shadow: 0 2px 8px #356fdc0a;
+}
+
+.speed-control .speed-native-select {
+  position: absolute;
+  z-index: -1;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  min-width: 0;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+  opacity: 0;
+}
+
+.speed-control .speed-trigger {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  margin: 0;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: background-color 140ms ease, box-shadow 140ms ease;
+}
+
+.speed-control .speed-trigger:hover,
+.speed-control .speed-trigger[aria-expanded="true"] {
+  background: var(--control-soft, #e7effe);
+}
+
+.speed-control .speed-trigger:focus-visible,
+.speed-menu .speed-option:focus-visible {
+  outline: 2px solid var(--blue, #356fdc);
+  outline-offset: 2px;
+}
+
+.speed-control .speed-label {
+  flex: none;
+  color: #72829a;
+  font-size: 11px;
+  pointer-events: none;
+}
+
+.speed-control .speed-current {
+  min-width: 0;
+  color: var(--control-ink, #254d91);
+  font-size: 13px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.speed-control .speed-chevron {
+  display: block;
+  flex: none;
+  width: 13px;
+  height: 13px;
+  margin-left: auto;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  transition: transform 150ms ease;
+  pointer-events: none;
+}
+
+.speed-control .speed-trigger[aria-expanded="true"] .speed-chevron {
+  transform: rotate(180deg);
+}
+
+.speed-menu {
+  box-sizing: border-box;
+  position: fixed;
+  inset: auto;
+  z-index: 2147483000;
+  display: none;
+  flex-direction: column;
+  gap: 3px;
+  min-width: min(112px, calc(100vw - 16px));
+  min-height: 128px;
+  max-height: calc(100vh - 16px);
+  margin: 0;
+  padding: 5px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border: 1px solid var(--control-line, #c6d7f5);
+  border-radius: 11px;
+  background: var(--control-surface, #f7faff);
+  color: var(--control-ink, #254d91);
+  box-shadow: 0 10px 28px #31548a20, 0 2px 7px #31548a0d;
+  pointer-events: auto;
+  overscroll-behavior: contain;
+  transform-origin: bottom center;
+  scrollbar-width: thin;
+}
+
+.speed-menu[data-open="true"] {
+  display: flex;
+  animation: speed-menu-enter 160ms cubic-bezier(.23, 1, .32, 1) both;
+}
+
+.speed-menu[data-open="true"][data-side="bottom"] {
+  transform-origin: top center;
+  animation-name: speed-menu-enter-down;
+}
+
+.speed-menu .speed-option {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: none;
+  width: 100%;
+  min-height: 40px;
+  margin: 0;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--control-ink, #254d91);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 550;
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.speed-menu .speed-option:hover {
+  background: var(--control-soft, #e7effe);
+}
+
+.speed-menu .speed-option[aria-checked="true"] {
+  background: var(--control-soft, #e7effe);
+  color: var(--control-ink, #254d91);
+  font-weight: 650;
+}
+
+.speed-menu .speed-option:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.speed-menu .speed-option-label {
+  pointer-events: none;
+}
+
+.speed-menu .speed-check {
+  display: block;
+  flex: none;
+  width: 15px;
+  height: 15px;
+  margin-left: 10px;
+  color: var(--blue, #356fdc);
+  stroke: currentColor;
+  stroke-width: 1.9;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.speed-menu .speed-option[aria-checked="true"] .speed-check {
+  opacity: 1;
+}
+
+@keyframes speed-menu-enter {
+  from { opacity: 0; transform: translateY(4px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes speed-menu-enter-down {
+  from { opacity: 0; transform: translateY(-4px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (max-width: 540px) {
+  .speed-control.playback-speed {
+    width: 116px;
+    border-radius: 8px;
+  }
+
+  .speed-menu {
+    min-width: min(116px, calc(100vw - 16px));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .speed-control .speed-trigger,
+  .speed-control .speed-chevron,
+  .speed-menu .speed-option {
+    transition: none;
+  }
+
+  .speed-menu[data-open="true"] {
+    animation: none;
+  }
+}

@@ -1,0 +1,12 @@
+import {chromium} from 'playwright';
+const browser=await chromium.launch({channel:'chrome',headless:true,args:['--ignore-gpu-blocklist']});
+const page=await browser.newPage({viewport:{width:1440,height:1000}});
+const errors=[];page.on('pageerror',e=>{errors.push(e.message);console.log('ERROR',e.message);});
+await page.goto('http://127.0.0.1:4198/engine.html?v=white-grid');
+await page.waitForFunction(()=>window.thermalDemo?.ready,{timeout:20000});
+await page.waitForTimeout(700);
+console.log(await page.evaluate(()=>({title:document.title,caption:document.querySelector('#caption-title').textContent,stage:document.querySelector('.visual-stage').getBoundingClientRect().toJSON(),overflow:document.documentElement.scrollWidth>innerWidth,bodyHeight:document.body.scrollHeight})));
+await page.screenshot({path:'qa/redesign-first-load.png',fullPage:true});
+await page.locator('#whiteboard-open').click();await page.waitForSelector('#whiteboard:not([hidden])');await page.waitForTimeout(500);
+await page.screenshot({path:'qa/redesign-whiteboard-empty.png',fullPage:true});
+console.log('errors',errors);await browser.close();

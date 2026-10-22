@@ -1,0 +1,15 @@
+import {chromium} from 'playwright';
+const browser=await chromium.launch({channel:'chrome',headless:true,args:['--ignore-gpu-blocklist','--enable-gpu-rasterization']});
+const page=await browser.newPage({viewport:{width:1440,height:1100},deviceScaleFactor:1});
+page.on('pageerror',e=>console.log('PAGE ERROR',e.message));page.on('console',m=>{if(m.type()==='error')console.log('CONSOLE',m.text().slice(0,800));});
+await page.goto('http://127.0.0.1:4198/engine.html',{waitUntil:'load'});
+await page.waitForFunction(()=>window.thermalDemo?.ready,{timeout:30000}).catch(e=>console.log('READY TIMEOUT',e.message));
+await page.waitForTimeout(2000);
+await page.screenshot({path:'qa/round1-desktop.png',fullPage:true});
+console.log('state',await page.evaluate(()=>({ready:window.thermalDemo?.ready,iframes:document.querySelectorAll('iframe').length,text:document.querySelector('#loading').textContent,overflow:document.documentElement.scrollWidth>innerWidth})));
+const f=page.frames().find(f=>f!==page.mainFrame());
+console.log('scene',await f?.evaluate(()=>({scene:!!window.engineScene,meshes:window.engineScene?.lab.partCount(),tris:window.engineScene?.lab.tris,mode:window.engineScene?.state.mode,angle:window.engineScene?.sim.angle})));
+await page.locator('[data-mode=explode]').click();await page.waitForTimeout(1500);await page.screenshot({path:'qa/round1-explode.png',fullPage:false});
+await page.locator('[data-view=paper]').click();await page.waitForTimeout(1000);await page.screenshot({path:'qa/round1-paper.png',fullPage:false});
+await page.setViewportSize({width:390,height:900});await page.locator('[data-view="3d"]').click();await page.locator('[data-mode=cut]').click();await page.waitForTimeout(1200);await page.screenshot({path:'qa/round1-mobile.png',fullPage:true});
+await browser.close();

@@ -1,0 +1,4 @@
+import {chromium} from 'playwright';
+import {pathToFileURL} from 'node:url';import {resolve} from 'node:path';
+const b=await chromium.launch({channel:'chrome',headless:true});const p=await b.newPage();p.on('pageerror',e=>console.log('ERROR',e.message));p.on('console',m=>{if(m.type()==='error')console.log('CONSOLE',m.text().slice(0,1000));});
+await p.goto(pathToFileURL(resolve('engine.html')).href);await p.waitForTimeout(3500);console.log(await p.evaluate(()=>({ready:window.thermalDemo?.ready,loading:document.querySelector('#loading')?.textContent,frames:frames.length})));for(const f of p.frames())console.log(f.url().slice(0,80),await f.evaluate(()=>({origin:location.origin,scene:!!window.engineScene,angle:window.engineScene?.sim.angle})));await p.screenshot({path:'qa/offline-debug.png'});await b.close();
