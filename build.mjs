@@ -36,4 +36,4 @@ const images=Object.fromEntries(catalog.filter(d=>existsSync(d.image)).map(d=>[d
 const homeJs=await bundle('map-home.mjs');
 const home=inlineStyles(readFileSync('map-home.source.html','utf8')).replace('<script type="module" src="./map-home.mjs"></script>',()=>`<script>window.HOME_IMAGES=${JSON.stringify(images)};</script><script>${scriptSafe(homeJs)}</script>`);
 writeFileSync('index.html',home);
-console.log(`Built fifteen-device map (${(Buffer.byteLength(home)/1024).toFixed(0)} KB; ${Object.keys(images).length} assembled thumbnails)`);
+console.log(`Built fifteen-device shelves (${(Buffer.byteLength(home)/1024).toFixed(0)} KB; ${Object.keys(images).length} assembled thumbnails)`);

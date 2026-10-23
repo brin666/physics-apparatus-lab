@@ -4,9 +4,14 @@
   "license": "MIT",
   "author": "brin666",
   "homepage": "https://brin666.github.io/physics-apparatus-lab/",
-  "repository": {"type": "git", "url": "https://github.com/brin666/physics-apparatus-lab.git"},
-  "engines": {"node": ">=22"},
-  "version": "0.1.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/brin666/physics-apparatus-lab.git"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {

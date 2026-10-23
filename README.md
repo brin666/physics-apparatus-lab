@@ -4,14 +4,17 @@
 
 [在线体验](https://brin666.github.io/physics-apparatus-lab/) · [MIT License](LICENSE) · [物理与几何复核](qa/PHYSICS-AUDIT.md)
 
-![器材地图](docs/images/overview.png)
+当前版本：**v0.2.0** · [更新记录](CHANGELOG.md)
+
+![器材陈列架](docs/images/overview.png)
 
 ## 可以做什么
 
-- 在器材关系地图中搜索、分类、缩放和平移；悬停打开圆角运行预览。
+- 在器材陈列架中搜索、分类；悬停打开圆角运行动画预览。
 - 进入器材后观看组装，运行、暂停、调整演示倍速及实验参数。
 - 拆解功能总成，单独旋转或移动部件，再平滑组装回去。
 - 点击部件查看名称与作用；通过剖切、透视理解内部构造。
+- 直流电动机支持金色电流亮纹、聚焦线圈的透视，以及圆点／叉号和受力箭头同步换向的简化横截面示意。
 - 打开白板冻结演示，绘图、写字并保存课堂记录；记录保存在当前浏览器。
 
 | 方向 | 器材 |
@@ -45,7 +48,8 @@ npm run build:pages # 生成 dist/ 静态站点及许可证
 - `apparatus/`：新增十二件器材的几何、教学状态、公共交互与测试。
 - `machine-scene.mjs` / `model.mjs`：汽油机几何与运动学。
 - `refrigeration-*.mjs`：冰箱、空调几何及制冷循环。
-- `map-home.*`：器材地图和按需运行预览。
+- `map-home.*`：器材陈列架和按需加载的视频预览。
+- `assets/previews/`：由实际三维模型录制的运行片段；首页不再为悬停预览创建 WebGL 场景。使用 `node scripts/capture-preview-clips.mjs` 重新录制（需先启动本地服务），`build:pages` 会打包这些文件。
 - `whiteboard*`：课堂白板及浏览器本地保存。
 - `build.mjs` / `scripts/stage-pages.mjs`：构建与静态发布。
 - `qa/`：浏览器检查脚本与审查报告。运行浏览器检查需启动本地服务并安装 Chrome；脚本依赖 Playwright。截图、录屏和临时JSON由检查脚本本地生成。

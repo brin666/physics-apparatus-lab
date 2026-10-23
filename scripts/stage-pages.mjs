@@ -16,5 +16,7 @@ for(const file of ['LICENSE','THIRD_PARTY_NOTICES.md','vendor/MACHINE-LICENSE','
  await mkdir(dirname(resolve(output,file)),{recursive:true});
  await copyFile(resolve(root,file),resolve(output,file));
 }
+await mkdir(resolve(output,'assets/previews'),{recursive:true});
+for(const device of catalog)await copyFile(resolve(root,`assets/previews/${device.id}.webm`),resolve(output,`assets/previews/${device.id}.webm`));
 await writeFile(resolve(output,'.nojekyll'),'');
-console.log(`Staged ${catalog.length+1} self-contained pages and license notices in dist/`);
+console.log(`Staged ${catalog.length+1} pages, lightweight preview clips and license notices in dist/`);

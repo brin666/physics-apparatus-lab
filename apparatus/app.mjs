@@ -13,9 +13,11 @@ function togglePanel(name,on){const panel=$(`#${name}-panel`),button=$(`#${name}
 function lessonReadout(){return scene.model.readout?.(scene.state.t,scene.state.inputs)??definition.readout(scene.state.t,scene.state.inputs);}
 function render(){if(!scene)return;const {state}=scene,isIntro=state.phase==='intro',exploded=state.mode==='explode',moving=['opening','closing'].includes(state.phase),running=state.playing&&!moving&&!exploded;
  document.body.classList.toggle('playing',running);document.body.classList.toggle('paused',!running||state.frozen);$('#play-text').textContent=exploded?'组装运行':moving?'正在组装':running?(isIntro?'暂停组装':'暂停演示'):(isIntro?'继续组装':'播放演示');$('#play').disabled=moving;
+ $$('[data-part]').forEach(b=>{const part=scene.records.find(r=>r.id===b.dataset.part);b.hidden=part?.object.userData.modelVisible===false||!!part?.object.userData.hideWhenExploded&&(exploded||moving);});
  $('#part-tools').hidden=!exploded;$('#part-reset').disabled=!state.selected;$('.speed-label').hidden=exploded;
- $$('[data-mode]').forEach(b=>{b.setAttribute('aria-pressed',String(b.dataset.mode===state.mode));if(b.dataset.mode==='explode')b.textContent=exploded?'装回':'拆解';});
- $('#skip-intro').hidden=!isIntro;$('#stage-subtitle').textContent=isIntro?'组装入场':exploded?'总成拆解 · 自由观察':definition.summary;
+ $$('[data-mode]').forEach(b=>{b.setAttribute('aria-pressed',String(b.dataset.mode===state.mode));if(b.dataset.mode==='explode')b.textContent=exploded?'装回':'拆解';if(b.dataset.mode==='cut')b.textContent=definition.cutLabel||'剖切';});
+ const section=definition.id==='dc-motor'&&state.mode==='cut'&&!isIntro;$('#section-legend').hidden=!section;
+ $('#skip-intro').hidden=!isIntro;$('#stage-subtitle').textContent=isIntro?'组装入场':exploded?'总成拆解 · 自由观察':section?'横截面示意 · 两侧有效导线截面已放大':definition.summary;
  const lesson=lessonReadout(),parts=scene.records,step=isIntro?Math.min(parts.length-1,Math.floor(state.elapsed/3.8*parts.length)):Math.max(0,Math.min(definition.stages.length-1,lesson.phaseIndex||0));
  $('#caption-title').textContent=isIntro?parts[step].name:exploded?'拆开，观察部件的连接':lesson.title;
  $('#caption-text').textContent=isIntro?parts[step].description:exploded?'按住零件旋转，切换「移动」调整位置，再组装回去。':lesson.text;

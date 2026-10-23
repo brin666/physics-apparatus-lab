@@ -95,7 +95,7 @@ function safeNumber(inputs, key, fallback) {
 }
 
 function motorPhysics(t, inputs = {}) {
-  const voltage = Math.max(0, safeNumber(inputs, 'voltage', 4));
+  const voltage = Math.max(0, safeNumber(inputs, 'voltage', .5));
   // Lumped classroom equivalent: armature V=IR+Ke*w, torque=Kt*I, load=b*w.
   const R = 2.4, Ke = .025, Kt = .025, b = .001;
   const omega = voltage / (Ke + R * b / Kt);
@@ -178,6 +178,7 @@ function boredCrossbar(parent,y) {
 
 function buildDcMotor() {
   const {root, parts, add} = moduleRoot();
+  const wireRed=material('#af0920',.08,.32),wireBlue=material('#0644ba',.08,.32);
   const base = add('motor-base', '底座与电源', '绝缘接线端将直流电源接入固定电刷。', [0,-.1,0]);
   box(base,[1.12,.10,1.05],[0,.10,.02],M.base);
   for (const sign of [-1,1]) {
@@ -193,12 +194,13 @@ function buildDcMotor() {
   }
   const poles = add('motor-poles','定子磁极','左 N 右 S，气隙中的磁场沿 +X。',[.12,0,0]);
   for (const sign of [-1,1]) {
-    box(poles,[.08,.40,.46],[sign*.29,.52,0],sign<0?M.blue:M.red);
-    named(box(poles,[.02,.40,.46],[sign*.24,.52,0],M.steel),`motor-pole-${sign}`);
-    label(poles,sign<0?'N':'S',[sign*.29,.55,.255],.09);
+    named(box(poles,[.08,.40,.46],[sign*.29,.52,0],sign<0?M.blue:M.red),`motor-pole-${sign}`);
+    named(label(poles,sign<0?'N':'S',[sign*.29,.55,.255],.09),`motor-pole-label-${sign}`);
   }
-  arrow(poles,[-.20,.79,0],[1,0,0],.40,0x398db8);
-  label(poles,'B',[0,.86,0],.06);
+  const fieldMark=named(new THREE.Group(),'motor-field-direction');poles.add(fieldMark);
+  fieldMark.userData.hideWhenExploded=true;
+  arrow(fieldMark,[-.20,.79,0],[1,0,0],.40,0x398db8);
+  const fieldLabel=label(fieldMark,'B',[0,.86,0],.06);
   const bearings = add('motor-bearings','轴承与支座','空心轴套包住转轴；支座止于轴套下方。',[0,.08,.14]);
   for (const z of [-.33,.49]) {
     box(bearings,[.17,.30,.075],[0,.30,z],M.darkSteel);
@@ -214,8 +216,9 @@ function buildDcMotor() {
   // winding. Its area normal is -Y; (-Y) x (+X) gives +Z torque at phase zero.
   const pts = windingPoints(6,.16,.20,(x,z,y)=>[x,y,z]);
   conductor(rm,pts,.005,M.enamel,'motor-winding');
-  conductor(rm,[pts[0],[.16,.04,-.255],[.207,.04,-.255],[.207,.04,.25],[.075,0,.29],[.09,0,.36]],.006,M.red,'motor-start-lead');
-  conductor(rm,[pts.at(-1),[.16,.136,-.265],[-.19,.055,-.265],[-.19,.055,.25],[-.075,.035,.29],[-.09,0,.36]],.006,M.blue,'motor-end-lead');
+  conductor(rm,[pts[0],[.16,.04,-.255],[.207,.04,-.255],[.207,.04,.25],[.075,0,.29],[.09,0,.36]],.006,wireRed,'motor-start-lead');
+  conductor(rm,[pts.at(-1),[.16,.136,-.265],[-.19,.055,-.265],[-.19,.055,.25],[-.075,.035,.29],[-.09,0,.36]],.006,wireBlue,'motor-end-lead');
+  let sectionMode=false,currentActive=true;
   const comm = add('motor-commutator','有绝缘缝的分裂环','两条轴向绝缘缝在零转矩位置经过电刷；惯性带过死点。',[0,0,.14]);
   const cm = named(new THREE.Group(),'motor-commutator-motion');cm.position.y=.52;comm.add(cm);
   const gap=.085;
@@ -227,22 +230,126 @@ function buildDcMotor() {
     named(box(brushes,[.08,.010,.045],[sign*.13,.52,.36],M.darkSteel),`motor-brush-${sign}`);
     box(brushes,[.07,.065,.075],[sign*.185,.52,.36],M.insulator);
     box(brushes,[.065,.28,.06],[sign*.20,.335,.36],M.insulator);
-    conductor(brushes,[[sign*.17,.52,.36],[sign*.28,.45,.40],[sign*.32,.225,.43]],.009,sign>0?M.red:M.blue);
+    const wire=conductor(brushes,[[sign*.17,.52,.36],[sign*.28,.45,.40],[sign*.32,.225,.43]],.009,sign>0?wireRed:wireBlue,`motor-supply-wire-${sign}`);
+    wire.userData.hideWhenExploded=true;
   }
   const marks=add('motor-force','电流与力方向','轴向电流与横向磁场的叉积给出切向力；半周后换向。',[0,0,.05]);
+  marks.userData.hideWhenExploded=true;
   const fa=arrow(marks,[.18,.52,.05],[0,1,0],.10,0xc46f35);
-  const ia=arrow(marks,[.18,.52,-.12],[0,0,1],.16,0xc44f45);
+  const ia=arrow(marks,[.18,.52,-.12],[0,0,1],.16,0xd99508);
   const fb=arrow(marks,[-.18,.52,.05],[0,-1,0],.10,0xc46f35);
-  const ib=arrow(marks,[-.18,.52,-.12],[0,0,-1],.16,0xc44f45);
-  return {root,parts,update(t,inputs={}) {
+  const ib=arrow(marks,[-.18,.52,-.12],[0,0,-1],.16,0xd99508);
+  // Two enlarged representative active-conductor sections, symmetrically
+  // arranged about a fixed shaft center for the simplified sectional view.
+  // Current/force signs follow the actual motor's commutation, not its leads.
+  const sectionDiagram=named(new THREE.Group(),'motor-section-diagram');marks.add(sectionDiagram);sectionDiagram.visible=false;
+  // A neutral schematic bridge connects the two sections behind their symbols.
+  const sectionBridge=named(new THREE.Mesh(new THREE.PlaneGeometry(.32,.012),new THREE.MeshBasicMaterial({color:'#aab9c9',toneMapped:false})),'motor-section-bridge');
+  sectionBridge.userData.nonPickable=true;sectionDiagram.add(sectionBridge);
+  const sectionPivot=named(new THREE.Mesh(new THREE.RingGeometry(.005,.009,32),new THREE.MeshBasicMaterial({color:'#718398',toneMapped:false})),'motor-section-pivot');
+  sectionPivot.position.set(0,.52,.025);sectionPivot.userData.nonPickable=true;sectionDiagram.add(sectionPivot);
+  const sections=[];
+  const ink=new THREE.MeshBasicMaterial({color:'#19344d',toneMapped:false});
+  const forceInk=new THREE.MeshBasicMaterial({color:'#cf6522',toneMapped:false});
+  for(const sign of [1,-1]){
+    const g=named(new THREE.Group(),`motor-section-${sign}`);sectionDiagram.add(g);
+    const fill=new THREE.MeshBasicMaterial({color:sign>0?'#ffd9d7':'#d2e5ff',toneMapped:false});
+    const edge=new THREE.MeshBasicMaterial({color:sign>0?'#ca3440':'#2564b5',toneMapped:false});
+    const disk=new THREE.Mesh(new THREE.CircleGeometry(.031,64),fill);g.add(disk);
+    const ring=new THREE.Mesh(new THREE.RingGeometry(.027,.032,64),edge);ring.position.z=.001;g.add(ring);
+    const dot=named(new THREE.Mesh(new THREE.CircleGeometry(.008,32),ink),`motor-section-dot-${sign}`);dot.position.z=.003;g.add(dot);
+    const cross=named(new THREE.Group(),`motor-section-cross-${sign}`);g.add(cross);
+    for(const angle of [Math.PI/4,-Math.PI/4]){
+      const stroke=new THREE.Mesh(new THREE.PlaneGeometry(.027,.0045),ink);stroke.rotation.z=angle;stroke.position.z=.003;cross.add(stroke);
+    }
+    const force=named(new THREE.Group(),`motor-section-force-${sign}`);sectionDiagram.add(force);
+    const stem=new THREE.Mesh(new THREE.CylinderGeometry(.0025,.0025,.055,12),forceInk);stem.position.y=.0275;force.add(stem);
+    const tip=new THREE.Mesh(new THREE.ConeGeometry(.010,.020,24),forceInk);tip.position.y=.065;force.add(tip);
+    sectionDiagram.traverse(o=>{o.userData.nonPickable=true;});
+    sections.push({sign,g,dot,cross,force});
+  }
+  // Surface highlights follow the real conductor paths. No bloom, extra lights,
+  // or wall-clock animation: the scene's simulation time also freezes these.
+  const currentBands=[];
+  for(const [name,direction,rotating] of [
+    ['motor-start-lead',-1,true],['motor-end-lead',1,true],
+  ]) {
+    const wire=root.getObjectByName(name),path=wire.geometry.parameters.path;
+    const mat=new THREE.ShaderMaterial({
+      transparent:true,depthWrite:false,toneMapped:false,
+      uniforms:{travel:{value:0},length:{value:path.getLength()}},
+      vertexShader:`varying vec2 vUv; varying vec3 vNormal;
+        void main(){vUv=uv;vNormal=normalize(normalMatrix*normal);
+          gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
+      fragmentShader:`uniform float travel; uniform float length;
+        varying vec2 vUv; varying vec3 vNormal;
+        void main(){
+          // One longer highlight on each colored rotor lead, two in total.
+          float band=mod(vUv.x*length-travel-length*0.28,length);
+          float edge=smoothstep(0.0,0.035,band)*(1.0-smoothstep(0.22,0.28,band));
+          if(edge<0.015)discard;
+          float reflection=pow(max(dot(normalize(vNormal),normalize(vec3(-0.3,0.8,1.0))),0.0),12.0);
+          vec3 gold=mix(vec3(0.90,0.45,0.015),vec3(1.0,0.79,0.10),edge);
+          gold=mix(gold,vec3(1.0,0.97,0.68),reflection*0.88);
+          gl_FragColor=vec4(gold,edge);
+          #include <colorspace_fragment>
+        }`,
+    });
+    const highlight=new THREE.Mesh(new THREE.TubeGeometry(path,Math.max(96,wire.userData.path.length*10),wire.userData.radius*1.65,8,false),mat);
+    highlight.name=`${name}-current`;highlight.userData.nonPickable=true;
+    highlight.userData.hideWhenExploded=true;wire.add(highlight);
+    currentBands.push({highlight,direction,rotating});
+  }
+  return {root,parts,
+    viewStyle(o,part,mode){
+      if(!['cut','xray'].includes(mode))return {opacity:1,pale:0};
+      if(mode==='cut')return {opacity:part.id==='motor-poles'||part.id==='motor-force'?1:0,pale:0};
+      if(/motor-(winding|start-lead|end-lead|supply-wire)/.test(o.name))return {opacity:1,pale:0};
+      if(part.id==='motor-force')return {opacity:1,pale:0};
+      if(part.id==='motor-poles')return mode==='cut'?{opacity:1,pale:0}:{opacity:.16,pale:.85};
+      if(part.id==='motor-commutator'||/^motor-brush-/.test(o.name))return {opacity:mode==='cut'?.12:.72,pale:mode==='cut'?.8:.2};
+      return {opacity:mode==='cut'?.055:.10,pale:.94};
+    },
+    setView({planar,mode}){
+      sectionMode=mode==='cut';
+      for(const part of parts)part.object.userData.modelVisible=!sectionMode||['motor-poles','motor-force'].includes(part.id);
+      sectionDiagram.visible=sectionMode&&planar>.97;
+      for(const {highlight} of currentBands)highlight.visible=highlight.userData.modelVisible=!sectionMode&&currentActive;
+      for(const a of [fa,fb,ia,ib])a.group.visible=!sectionMode&&currentActive;
+      for(const sign of [-1,1])poles.getObjectByName(`motor-pole-label-${sign}`).position.set(sign*.29,.55,.255);
+      fieldMark.position.y=.045*planar;fieldMark.position.z=0;fieldLabel.position.z=0;
+    },
+    update(t,inputs={}) {
     const s=motorPhysics(t,inputs);rm.rotation.z=cm.rotation.z=s.phase;
     const c=Math.cos(s.phase),q=Math.sin(s.phase),pol=s.polarity;
+    currentActive=s.current>0&&pol!==0;
+    // Integral of the commutated direction, with a plateau at each insulating
+    // gap. This reverses continuously, and remains deterministic on restore.
+    const rotorTravel=s.omega>0?THREE.MathUtils.clamp(Math.asin(Math.sin(s.phase)),-Math.PI/2+gap,Math.PI/2-gap)*.34/(s.omega*.22):0;
+    for(const {highlight,direction,rotating} of currentBands){
+      highlight.material.uniforms.travel.value=direction*(rotating?rotorTravel:t*.34);
+      highlight.visible=highlight.userData.modelVisible=!sectionMode&&s.current>0&&pol!==0;
+    }
     for(const [sign,f,i] of [[1,fa,ia],[-1,fb,ib]]) {
       const x=sign*.16*c-.088*q,y=.52+sign*.16*q+.088*c;
       f.helper.position.set(x,y,0);f.helper.setDirection(v3([0,sign*(pol||1),0]));
       i.helper.position.set(x,y,-.12);i.helper.setDirection(v3([0,0,sign*(pol||1)]));
-      f.group.visible=i.group.visible=s.current>0&&pol!==0;
-    }return s;
+      f.group.visible=i.group.visible=!sectionMode&&currentActive;
+    }
+    sectionBridge.position.set(0,.52,.015);
+    sectionBridge.rotation.z=s.phase;
+    for(const {sign,g,dot,cross,force} of sections){
+      const x=sign*.16*c,y=.52+sign*.16*q;
+      const out=sign*pol;
+      g.position.set(x,y,.02);
+      g.userData.currentDirection=out;
+      dot.visible=currentActive&&out>0;cross.visible=currentActive&&out<0;
+      force.visible=currentActive;
+      force.position.set(x,y+out*.038,.02);
+      force.rotation.z=out<0?Math.PI:0;
+      force.userData.forceDirection=out;
+    }
+    return s;
   }};
 }
 
@@ -454,13 +561,14 @@ const generatorStages = [
 export const devices = [
   {
     id: 'dc-motor', name: '直流电动机', category: 'electromagnetic',
+    cutLabel:'剖切',flatViewDirection:[0,0,1],
     summary: '直流电流经电刷和换向器进入转子线圈，磁场力产生连续转矩。',
     principle: '磁场中的通电线圈受到力矩；分裂环换向器每半周反转线圈电流，使转矩方向保持一致。',
     notes: '几何是比例教学模型，并非某台电机的测绘复刻。转速读数采用直流电机稳态等效式：V=IR+Keω、τ=KtI、τload=bω；显示电流和反电动势由同一稳态解得出。线圈旋转动画按计算转速的 22% 播放以便看清换向，读数仍为模型转速。R、Ke、Kt、b 是平均课堂等效参数，不代表产品实测规格。单线圈瞬时转矩并不恒定，绝缘缝处暂时为零；以惯性近似维持匀速，不能从任意死点自启动。线圈平面平行 Z 轴，偏置绕组与配重避开主轴；磁场沿 X，实际换向位置为 θ=π/2 与 3π/2。',
     sources: [
       { label: 'OpenStax University Physics 2, torque on a current loop and DC motor commutator', url: 'https://openstax.org/books/university-physics-volume-2/pages/11-5-force-and-torque-on-a-current-loop' },
     ],
-    controls: [{ id: 'voltage', label: '电枢电压', min: 0, max: 6, step: .1, value: 4, unit: 'V' }],
+    controls: [{ id: 'voltage', label: '电枢电压', min: 0, max: 6, step: .1, value: .5, unit: 'V' }],
     stages: motorStages,
     build: buildDcMotor,
     phaseRate: inputs => motorPhysics(0, inputs).omega * .22,

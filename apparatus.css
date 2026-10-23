@@ -6,3 +6,11 @@ body.preview{background:transparent}.preview .device-shell{height:100%;min-heigh
 
 #phase-track em{display:block;font-style:normal;font-weight:inherit;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}#phase-track[data-key^="a"]>div{font-size:12px}.device-shell{grid-template-rows:76px minmax(0,1fr) auto}.teaching-footer{min-height:94px;padding-bottom:4px}
 @media(max-width:700px){.device-shell{grid-template-rows:65px minmax(0,1fr) auto}.teaching-footer{min-height:120px}}
+
+#section-legend{position:absolute;left:32px;top:112px;display:flex;gap:20px;align-items:center;color:#294c70;font-size:15px;pointer-events:none;z-index:2}
+#section-legend[hidden]{display:none}
+#section-legend span{display:inline-flex;align-items:center;gap:6px}
+#section-legend svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+#section-legend .legend-dot{fill:currentColor;stroke:none}
+#section-legend .legend-force{color:#bb581a}
+@media(max-width:600px){#section-legend{left:16px;top:120px;gap:12px;font-size:12px}#section-legend svg{width:19px;height:19px}}
