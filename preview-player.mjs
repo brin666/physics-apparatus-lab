@@ -8,9 +8,9 @@ export function createPreviewPlayer(stage,status,placeholder,reduced){
   if(video){pool.delete(device.id);pool.set(device.id,video);return video;}
   video=document.createElement('video');video.muted=true;video.loop=true;video.playsInline=true;video.preload='auto';video.tabIndex=-1;
   video.setAttribute('aria-label',`${device.name}运行动态`);video.setAttribute('disablepictureinpicture','');
-  const mp4=!!video.canPlayType('video/mp4; codecs="avc1.4D401E"');
+  const mp4=!!video.canPlayType('video/mp4; codecs="avc1.42E01E"');
   video.dataset.format=mp4?'mp4':'webm';
-  const source=()=>`./assets/previews/${device.id}.${video.dataset.format}?v=0.3.1`;
+  const source=()=>`./assets/previews/${device.id}.${video.dataset.format}?v=0.3.2`;
   video.addEventListener('error',()=>{
    if(video.dataset.format==='mp4'){video.dataset.format='webm';video.src=source();video.load();}
    else video.dataset.failed='true';
@@ -30,11 +30,18 @@ export function createPreviewPlayer(stage,status,placeholder,reduced){
   const unavailable=()=>{status.hidden=false;status.textContent='预览暂时未载入，可直接进入教具。';};
   const slow=setTimeout(()=>{status.hidden=false;status.textContent='正在准备演示…';},900);
   const timeout=setTimeout(unavailable,15000);
+  let requested=false;
   const play=()=>{
+   if(requested||active!==video||video.readyState<2)return;
+   // A first decoded frame is not enough to sustain motion on a jittery link.
+   // Keep the model visible until we have a short runway (or the whole tail).
+   let ahead=0;for(let i=0;i<video.buffered.length;i++)if(video.buffered.start(i)<=video.currentTime+.05&&video.buffered.end(i)>video.currentTime)ahead=video.buffered.end(i)-video.currentTime;
+   if(ahead<Math.min(1.25,Math.max(0,(video.duration||Infinity)-video.currentTime))-.03)return;
+   requested=true;
    video.play().catch(()=>{if(active===video)unavailable();});
   };
-  video.addEventListener('loadeddata',play,{signal:listeners.signal});
-  video.addEventListener('error',()=>{if(video.dataset.failed==='true'){clearTimeout(slow);clearTimeout(timeout);unavailable();}},{signal:listeners.signal});
+  for(const event of ['loadeddata','progress','canplay','canplaythrough'])video.addEventListener(event,play,{signal:listeners.signal});
+  video.addEventListener('error',()=>{requested=false;if(video.dataset.failed==='true'){clearTimeout(slow);clearTimeout(timeout);unavailable();}},{signal:listeners.signal});
   if(video.requestVideoFrameCallback)frame=video.requestVideoFrameCallback(reveal);
   else video.addEventListener('playing',reveal,{once:true,signal:listeners.signal});
   if(video.readyState>=2){if(video.dataset.presented==='true')reveal();play();}

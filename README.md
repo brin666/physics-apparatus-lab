@@ -4,7 +4,7 @@
 
 [在线体验](https://brin666.github.io/physics-apparatus-lab/) · [MIT License](LICENSE) · [物理与几何复核](qa/PHYSICS-AUDIT.md)
 
-当前版本：**v0.3.1** · [更新记录](CHANGELOG.md)
+当前版本：**v0.3.2** · [更新记录](CHANGELOG.md)
 
 ![器材陈列架](docs/images/overview.png)
 

@@ -26,7 +26,8 @@
 /* Keep a model visible until the decoder has actually presented its first frame. */
 #preview-placeholder{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#fff;transition:opacity .15s}
 #preview-placeholder svg{width:88%;height:88%;max-width:none;filter:none;transform:none;margin:0}
-#preview-stage video{position:absolute;inset:0;opacity:0;transition:opacity .15s}
+#preview-stage{contain:layout paint;isolation:isolate}
+#preview-stage video{position:absolute;inset:0;opacity:0;transition:opacity .15s;transform:translateZ(0);backface-visibility:hidden}
 #preview-stage.is-playing video{opacity:1}
 #preview-stage.is-playing #preview-placeholder{opacity:0}
 #preview-stage #preview-loading{inset:auto 12px 8px;min-height:25px;padding:4px 8px;border-radius:6px;background:#fffffff0;text-align:center}
