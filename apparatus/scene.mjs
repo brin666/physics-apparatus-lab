@@ -4,6 +4,7 @@ import {RoomEnvironment} from 'three/addons/environments/RoomEnvironment.js';
 import {previewInputs,hasGuidedOperation,guidedStart} from './preview-inputs.mjs';
 import {playbackProgress,seekPlayback} from './playback.mjs';
 import {submarineActionInputs} from './submarine-actions.mjs';
+import {planExplodedLayout} from './exploded-layout.mjs';
 const smooth=t=>{t=clamp(t);return t*t*t*(t*(t*6-15)+10)};
 export function createApparatusScene(container,definition,{onSelect=()=>{},onInput=()=>{},onChange=()=>{},preview=false,staticView=false}={}){
  const renderer=new THREE.WebGLRenderer({antialias:true,alpha:true,preserveDrawingBuffer:true});renderer.localClippingEnabled=true;renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));renderer.setClearColor(0xffffff,0);renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.15;container.append(renderer.domElement);renderer.domElement.setAttribute('aria-label',`${definition.name}三维模型`);renderer.domElement.tabIndex=preview?-1:0;
@@ -25,16 +26,10 @@ export function createApparatusScene(container,definition,{onSelect=()=>{},onInp
   return {...part,pivot,position,box,explodeBox,materials,fromPos:position.clone(),fromQ:new THREE.Quaternion(),toPos:position.clone().add(new THREE.Vector3(...part.explode)),order:i};
  });
  const order=[...records.filter(r=>!r.shell&&!r.assemblyShell),...records.filter(r=>r.shell||r.assemblyShell)];order.forEach((r,i)=>r.order=i);
- // Lay out assemblies in the initial camera plane. Depth-only author offsets can
- // leave objects covering each other; a fixed, spaced layout keeps every part readable.
+ // A stable, asymmetric exploded study view, with the frame at its centre.
  const facing=new THREE.Vector3(...(definition.viewDirection||[.9,.55,1.7])).normalize(),right=new THREE.Vector3().crossVectors(new THREE.Vector3(0,1,0),facing).normalize(),planeUp=new THREE.Vector3().crossVectors(facing,right).normalize();
- const projectedSize=r=>{const v=r.explodeBox.getSize(new THREE.Vector3());return [Math.abs(right.x)*v.x+Math.abs(right.y)*v.y+Math.abs(right.z)*v.z,Math.abs(planeUp.x)*v.x+Math.abs(planeUp.y)*v.y+Math.abs(planeUp.z)*v.z];};
- const explodedRecords=records.filter(r=>!r.object.userData.hideWhenExploded);
- const sizes=explodedRecords.map(projectedSize),cellW=Math.max(...sizes.map(s=>s[0]))+span*.16,cellH=Math.max(...sizes.map(s=>s[1]))+span*.16,cols=explodedRecords.length>9?4:3,rows=Math.ceil(explodedRecords.length/cols);
- const primary=explodedRecords.find(r=>r.object.userData.explodePrimary)||explodedRecords.find(r=>/base|frame|stand|机架|底座/.test(r.id+' '+r.name))||explodedRecords[0];
- const slots=Array.from({length:cols*rows},(_,i)=>({x:i%cols-(cols-1)/2,y:(rows-1)/2-Math.floor(i/cols)}));slots.sort((a,b)=>Math.hypot(a.x,a.y)-Math.hypot(b.x,b.y));
- [primary,...explodedRecords.filter(r=>r!==primary)].forEach((r,i)=>{r.toPos.copy(center).addScaledVector(right,slots[i].x*cellW).addScaledVector(planeUp,slots[i].y*cellH).sub(r.explodeBox.getCenter(new THREE.Vector3())).add(r.position);});
- const explodedBox=new THREE.Box3();explodedRecords.forEach(r=>explodedBox.union(r.explodeBox.clone().translate(r.toPos.clone().sub(r.position))));
+ const layout=planExplodedLayout(records,{center,span,right,up:planeUp,facing}),explodedBox=layout.bounds;
+ for(const r of records){const target=layout.targets.get(r.id);r.toQ=target?.quaternion||new THREE.Quaternion();r.openOrder=target?.index||0;if(target)r.toPos.copy(target.position);}
  const raycaster=new THREE.Raycaster(),pointer=new THREE.Vector2();let flatBlend=0,focusBlend=0;const paleColor=new THREE.Color('#d5dce4');let gesture=null,raf=0,last=performance.now(),disposed=false,fitMode='assembled',updatedT=0,cameraTween=null,hasSize=false,resumePlaying=false,lastViewportWidth=innerWidth,lastViewportHeight=innerHeight;
  function projection(half){if(camera.isOrthographicCamera){camera.top=half;camera.bottom=-half;camera.left=-half*camera.aspect;camera.right=half*camera.aspect;}camera.updateProjectionMatrix();}
  function flatMode(){return !!definition.flatViewDirection&&state.mode==='cut';}
@@ -99,8 +94,8 @@ export function createApparatusScene(container,definition,{onSelect=()=>{},onInp
    records.forEach(r=>{const u=smooth((state.elapsed/duration*(1+records.length*.08)-r.order*.08)/.85);r.pivot.visible=u>0;r.pivot.position.copy(r.position).addScaledVector(new THREE.Vector3(...r.explode),1-u);r.pivot.quaternion.identity();appearance(r,clamp(u*3));});
    if(state.elapsed>=duration){state.phase='closed';state.mode=definition.defaultMode||'assembled';model.setView?.({planar:flatBlend,mode:state.mode});if(model.viewBounds?.(state.mode))fit(false,true);if(hasGuidedOperation(definition.id)){if(definition.timeContinuous)state.guideOffset=guidedStart(definition.id,inputs)-state.t;else state.t=guidedStart(definition.id,inputs);}state.playing=true;records.forEach(r=>{r.pivot.visible=true;r.pivot.position.copy(r.position);appearance(r);});onChange();}
   }else if(state.phase==='opening'||state.phase==='closing'){
-   state.elapsed+=dt;const opening=state.phase==='opening',u=smooth(state.elapsed/(opening?1.05:1.3));
-   records.forEach(r=>{r.pivot.position.lerpVectors(r.fromPos,opening?r.toPos:r.position,u);r.pivot.quaternion.copy(r.fromQ).slerp(new THREE.Quaternion(),u);appearance(r);});
+   state.elapsed+=dt;const opening=state.phase==='opening',duration=opening?1.18:1.35,u=clamp(state.elapsed/duration);
+   records.forEach(r=>{const delay=Math.min(r.openOrder,12)*.018,p=clamp((state.elapsed-delay)/(duration-.24)),move=opening?1-Math.pow(1-p,3):smooth(clamp((p-.10)/.90)),turn=opening?1-Math.pow(1-p,3):smooth(clamp(p/.68));r.pivot.position.lerpVectors(r.fromPos,opening?r.toPos:r.position,move);r.pivot.quaternion.copy(r.fromQ).slerp(opening?r.toQ:new THREE.Quaternion(),turn);appearance(r);});
    if(u===1){state.phase=opening?'open':'closed';if(!opening){state.playing=true;}onChange();}
   }else{
    if(state.playing&&state.phase==='closed'){state.seekEnd=false;state.t+=dt*state.speed;}
@@ -134,7 +129,7 @@ export function createApparatusScene(container,definition,{onSelect=()=>{},onInp
    else seekPlayback(definition,state,model,progress);
    updatedT=state.t;records.forEach(r=>appearance(r));onChange();
   },
-  resetPart(){const r=records.find(r=>r.id===state.selected);if(r){r.pivot.position.copy(r.toPos);r.pivot.quaternion.identity();}},
+  resetPart(){const r=records.find(r=>r.id===state.selected);if(r){r.pivot.position.copy(r.toPos);r.pivot.quaternion.copy(r.toQ);}},
   freeze(value){if(value===state.frozen)return;if(value){resumePlaying=state.playing;state.playing=false;gesture=null;orbit.enabled=!preview;}else state.playing=resumePlaying;state.frozen=value;},
   dispose(){disposed=true;cancelAnimationFrame(raf);observer.disconnect();orbit.dispose();target.dispose();scene.traverse(o=>{o.geometry?.dispose();if(o.material)for(const m of Array.isArray(o.material)?o.material:[o.material]){m.map?.dispose();m.dispose();}});renderer.dispose();renderer.domElement.remove();}
  };

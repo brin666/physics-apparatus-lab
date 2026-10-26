@@ -5,23 +5,22 @@ export const acAssemblyOwners={louver:'blower',drain:'blower',reversing:'compres
 export const coolingAssemblyOwners={fridge:fridgeAssemblyOwners,ac:acAssemblyOwners};
 export const coolingExploration = {
   fridge: {
-    // Keep the cabinet as the central reference. Exchanger and compressor
-    // locations form separate screen-space slots in the default teaching view.
-    offsets: {door:[1.30,.08,.08],shell:[0,0,0],condenser:[-1.10,-.02,.35],
-      evaporator:[-1.10,.57,.20],compressor:[1.15,-.20,.15]},
-    tilts:{door:[0,.12,0],shell:[0,0,0],condenser:[0,.16,0],evaporator:[.10,.16,0]},
+    // Keep the cabinet central; stagger complete assemblies around it.
+    offsets: {door:[1.34,.17,.10],shell:[0,0,0],condenser:[-1.20,-.10,.30],
+      evaporator:[-.98,.72,.24],compressor:[1.15,-.27,.20]},
+    tilts:{door:[.04,.18,-.09],shell:[0,0,0],condenser:[.06,.22,-.08],evaporator:[.13,.16,.13],compressor:[.08,-.18,-.12]},
     assemblyOrder:['condenser','compressor','evaporator','shell','door'],
     attachments:fridgeAssemblyOwners,leadIn:.18,
     moveLimit:3.2,focusLift:.025,
   },
   ac: {
-    // Two central housings, with complete airflow and refrigeration assemblies
-    // in separate side columns. The drain tray stays with the indoor blower.
+    // Two central housings; varied height and tilt keep the surrounding
+    // assemblies distinct. The drain tray stays with the indoor blower.
     offsets:{'indoor-shell':[.60,0,0],'outdoor-shell':[-.555,0,0],
-      filter:[-.60,.37,.10],'indoor-coil':[-.60,.04,.14],blower:[1.80,.02,.04],
-      'outdoor-coil':[-1.646,.17,.20],fan:[-1.61,-.50,-.05],compressor:[.388,.04,.02]},
-    tilts:{'indoor-shell':[0,0,0],'outdoor-shell':[0,0,0],filter:[.08,.12,0],
-      'indoor-coil':[0,.12,0],fan:[0,.12,0],'outdoor-coil':[0,.12,0]},
+      filter:[-.90,.60,.15],'indoor-coil':[-.80,-.08,.14],blower:[1.65,.36,.10],
+      'outdoor-coil':[-1.55,.18,.20],fan:[-1.82,-.64,.05],compressor:[.74,-.02,.14]},
+    tilts:{'indoor-shell':[0,0,0],'outdoor-shell':[0,0,0],filter:[.10,.20,-.18],
+      'indoor-coil':[.04,.22,.12],blower:[.08,-.24,.17],fan:[.08,.22,-.18],'outdoor-coil':[.06,.22,-.12],compressor:[.10,-.22,.16]},
     assemblyOrder:['compressor','outdoor-coil','indoor-coil','fan','blower','filter','outdoor-shell','indoor-shell'],
     attachments:acAssemblyOwners,leadIn:.18,
     moveLimit:3.8,focusLift:.025,

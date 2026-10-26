@@ -138,6 +138,7 @@ function buildSubmarine() {
   const make=(id,name,text,offset=[0,0,0],shell=false)=>{const p=assembly(root,id,name,text,offset,shell);parts.push(p);return p;};
   const motion=part=>{const g=nested(part);moving.push(g);return g;};
   const basin=make('basin','透明教学水槽','水面是浮沉的参照；艇体运动时镜头保持固定。',[0,-.08,0]);
+  basin.object.userData.hideWhenExploded=true;
   const rim=material('#7494ad',.3,.45),glass=material('#b9ddeb',.03,.3,.045);
   box(basin.object,[1.84,.04,.80],[0,.10,0],rim);
   for(const z of [-.39,.39])box(basin.object,[1.84,1.18,.006],[0,.71,z],glass).userData.nonPickable=true;
@@ -147,6 +148,7 @@ function buildSubmarine() {
   for(const z of [-.38,.38])box(surface,[1.8,.003,.003],[0,0,z],rim).userData.nonPickable=true;
   for(const x of [-.9,.9])box(surface,[.003,.003,.76],[x,0,0],rim).userData.nonPickable=true;
   const hull=make('pressure-hull','透明艇壳','透明圆头艇身包围内部舱室；轮廓、压载舱和空气瓶的位置与剖面一致。',[0,.10,0],true);
+  hull.object.userData.explodePrimary=true;
   const hullEnvelope=motion(hull);hullEnvelope.name='sub-displacement-hull';
   const ballast=make('ballast-tanks','前后压载舱','前后两只压载舱对称进排水，每舱容积16 L；蓝色水位显示充水量。',[0,0,.25],true);
   const air=make('air-bank','压缩空气瓶与分支管','中央空气瓶经上方管道把空气送入两只压载舱，将水排出艇外。',[0,.20,.12]);
