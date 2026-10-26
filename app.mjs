@@ -3,13 +3,14 @@ import {engineAt,STROKES,PARTS} from './model.mjs';
 import {createWhiteboard} from './whiteboard.mjs';
 import {mountSpeedControl} from './speed-control.mjs';
 import {mountCycleProgress} from './cycle-progress.mjs';
+import {mountPlaybackTimeline} from './playback-timeline.mjs';
 import {assemblyAt,ASSEMBLY_STEPS,ASSEMBLY_DURATION,ASSEMBLY_STEP_SECONDS,ASSEMBLY_MOVE_SECONDS} from './assembly-model.mjs';
 const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
 const reduced=matchMedia('(prefers-reduced-motion: reduce)');
 mountSpeedControl($('#speed'));
 const cycleProgress=mountCycleProgress($('#cycle-overview'));
 const state={angle:410,mode:'cut',selected:null,view:'3d',playing:false,speed:1,visible:true,labels:true,reduced:reduced.matches,chapter:'cycle',interaction:'lesson'};
-let whiteboard=null;
+let whiteboard=null,timeline=null;
 let hasPlayed=false,explorationPhase='closed',resumeAfterAssembly=false;
 const INTRO_RATE=1.5;
 let lessonOpen=false,lessonSection='structure',lessonCloseTimer=0;
@@ -126,6 +127,7 @@ function seekAssembly(time){if(!sequence.active)startAssembly();sequence.running
 function nextAssembly(){const s=assemblyAt(sequence.time);if(s.index===7){finishAssembly(false);$('#play').focus({preventScroll:true});return;}seekAssembly((s.index+1)*ASSEMBLY_STEP_SECONDS+ASSEMBLY_MOVE_SECONDS);}
 function toggleAssembly(){if(state.reduced){nextAssembly();return;}sequence.running=!sequence.running;render();post(true);say(sequence.running?'继续组装演示。':`组装已暂停在第${assemblyAt(sequence.time).index+1}步。`);kick();}
 function render(){
+  timeline?.({progress:state.angle/720,hidden:sequence.active||state.mode==='explode'||explorationPhase!=='closed',disabled:state.interaction==='whiteboard',text:STROKES[engineAt(state.angle).strokeIndex].name});
   assemblyUI();updateCaption();updateCycleOverview();
   if(sequence.active){post();return;}
   const s=engineAt(state.angle),phase=STROKES[s.strokeIndex],shown=Math.floor(state.angle);
@@ -298,6 +300,7 @@ $('#whiteboard-open').addEventListener('click',()=>whiteboard.open().catch(error
 // The build inlines the renderer and UI dependencies: opening engine.html needs no network.
 if(window.MACHINE_DOCUMENT)frame.srcdoc=window.MACHINE_DOCUMENT;else frame.src='./machine.html?embed=1';
 syncLessonTabs();if(!sequence.active)selectPart(null,true);render();
+timeline=mountPlaybackTimeline($('#cycle-overview'),value=>setAngle(value*720,false));render();
 window.thermalDemo={state,engineAt,setAngle,setMode,setPlaying,showView,selectPart,startAssembly,finishAssembly,seekAssembly,setChapter,showLesson,setLessonSection,whiteboard,get ready(){return ready;}};
 
 mountLegacyPreview(()=>window.thermalDemo,'engine');

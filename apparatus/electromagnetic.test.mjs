@@ -116,8 +116,11 @@ test('motor and generator windings have the required area normal and real connec
     const w=model.root.getObjectByName(`${prefix}-winding`),p=w.userData.path;
     const area=new THREE.Vector3();for(let i=1;i<p.length;i++)area.add(new THREE.Vector3(...p[i-1]).cross(new THREE.Vector3(...p[i])));
     assert.ok(area.normalize().dot(new THREE.Vector3(...expected))>.98,`${id}: winding area normal`);
-    assert.deepEqual(model.root.getObjectByName(`${prefix}-start-lead`).userData.path[0],p[0]);
-    assert.deepEqual(model.root.getObjectByName(`${prefix}-end-lead`).userData.path[0],p.at(-1));
+    for(const [side,endpoint] of [['start',p[0]],['end',p.at(-1)]]){
+      const lead=model.root.getObjectByName(`${prefix}-${side}-lead`),terminal=model.root.getObjectByName(`${prefix}-${side}-terminal`);
+      assert.deepEqual((terminal||lead).userData.path[0],endpoint);
+      if(terminal)assert.deepEqual(terminal.userData.path.at(-1),lead.userData.path[0]);
+    }
     // Adjacent long runs must leave enamel clearance, rather than overlapping copper.
     assert.ok(new THREE.Vector3(...p[0]).distanceTo(new THREE.Vector3(...p[4]))>2*w.userData.radius);
   }
@@ -228,6 +231,48 @@ test('generator lower-ring lead passes through the other ring insulated bore wit
     if(Math.abs(v.y-.38)<.018){samples++;assert.ok(Math.hypot(v.x,v.z)<.041,'lower lead must remain inside upper ring insulating bore');}
   });
   assert.ok(samples>0);
+});
+
+test('generator output leads clear brush supports and lower-ring lead uses a real sleeve opening',()=>{
+  const m=byId.generator.build();m.update(0);m.root.updateMatrixWorld(true);
+  const supports=[0,1].flatMap(i=>['holder','stand'].map(kind=>new THREE.Box3().setFromObject(m.root.getObjectByName(`generator-brush-${kind}-${i}`))));
+  for(const i of [0,1])vertices(m.root.getObjectByName(`generator-output-wire-${i}`),v=>{
+    for(const b of supports)assert.ok(b.distanceToPoint(v)>.001,'wire and gold band must clear brush supports');
+  });
+  const sleeve=m.root.getObjectByName('generator-ring-sleeve-1');
+  const ray=new THREE.Raycaster(new THREE.Vector3(.033,.5,0),new THREE.Vector3(0,-1,0));
+  assert.equal(ray.intersectObject(sleeve).length,0,'feed-through is open in the actual mesh');
+  ray.ray.origin.set(0,.5,.033);assert.ok(ray.intersectObject(sleeve).length>0,'insulation remains around the opening');
+  let checked=0;
+  vertices(m.root.getObjectByName('generator-start-lead'),v=>{
+    if(Math.abs(v.y-.38)<.0275){checked++;assert.ok(Math.hypot(v.x-.033,v.z)<.0073,'red conductor and highlight stay inside feed-through');}
+  });
+  assert.ok(checked>0);
+  const end=m.root.getObjectByName('generator-start-lead').userData.path.at(-1);
+  assert.ok(Math.abs(end[1]+.79-(.30+.018))<1e-8&&Math.hypot(end[0],end[2])>.041,'red lead terminates on its own copper ring top face');
+});
+
+test('generator colored jackets and highlights stay below the winding with connected copper tails',()=>{
+  const m=byId.generator.build();m.update(0);m.root.updateMatrixWorld(true);
+  const coil=m.root.getObjectByName('generator-winding'),bounds=new THREE.Box3().setFromObject(coil);
+  for(const side of ['start','end']){
+    const lead=m.root.getObjectByName(`generator-${side}-lead`),terminal=m.root.getObjectByName(`generator-${side}-terminal`);
+    vertices(lead,v=>assert.ok(v.y<bounds.min.y-.015,'colored wire and gold must not enter or poke through copper turns'));
+    const a=terminal.userData.path[0],b=terminal.userData.path.at(-1);
+    assert.equal(a[0],b[0]);assert.equal(a[2],b[2]);assert.ok(b[1]<a[1]-.025,'copper exit goes straight away from winding before bending');
+    assert.deepEqual(b,lead.userData.path[0]);
+    const ringY=side==='start'?.30:.38,end=lead.userData.path.at(-1),radial=Math.hypot(end[0],end[2]),outer=lead.userData.radius*1.1;
+    assert.ok(Math.abs(end[1]+.79-(ringY+.018))<1e-8,'lead terminates at its slip ring top surface');
+    assert.ok(radial-outer>.041&&radial+outer<.095-.003,'colored terminal and gold stay inside copper ring rim');
+  }
+  const a=m.root.getObjectByName('generator-start-lead'),b=m.root.getObjectByName('generator-end-lead');
+  for(let i=0;i<=600;i++){
+    const p=a.geometry.parameters.path.getPoint(i/600);
+    for(const segment of b.geometry.parameters.path.curves){
+      const line=new THREE.Line3(segment.v1,segment.v2),q=line.closestPointToPoint(p,true,new THREE.Vector3());
+      assert.ok(p.distanceTo(q)>(a.userData.radius+b.userData.radius)*1.1+.002,'red and blue jackets including gold have independent routes');
+    }
+  }
 });
 
 test('speaker flexible lead anchors remain fixed and moving endpoints stay on winding ends',()=>{

@@ -1,4 +1,6 @@
 import { THREE, material, box, cylinder, sphere, torus, pipe, coil, label, assembly } from './kit.mjs';
+import {createHobSection} from './hob-section.mjs';
+import {electroscopeVisual,electroscopeElectronFlow} from './electroscope-motion.mjs';
 
 const clamp = (value, min, max) => {
   const number = Number(value);
@@ -166,13 +168,15 @@ function buildHob() {
   pathTube(mains.object, [[-.53, .085, -.22], [-.60, .06, -.22], [-.60, .02, -.34]], .018, polymer);
   box(mains.object, [.08, .08, .08], [-.60, .02, -.35], graphite);
 
-  const machine = { root, parts, update(t, inputs = {}) {
+  const section=createHobSection(parts,spiral);
+  const machine = { root, parts, setView:section.setView, update(t, inputs = {}) {
     const state = hobReadout(t, inputs);
     const power = number(inputs, 'power', 65, 0, 100) / 100;
     const pan = choice(inputs, 'pan', ['steel', 'none'], 'steel');
     panPart.object.visible = panPart.object.userData.modelVisible = pan === 'steel';
     eddyPart.object.visible = eddyPart.object.userData.modelVisible = pan === 'steel' && power > 0;
     fieldPart.object.visible = fieldPart.object.userData.modelVisible = power > 0 && pan === 'steel';
+    section.update(Number(t)||0,power,power>0&&pan==='steel');
     const pulse = .75 + .25 * Math.sin(2 * Math.PI * .35 * Math.max(0, Number(t) || 0));
     eddyMat.emissiveIntensity = power * pulse;
     fieldMat.emissiveIntensity = power * pulse;
@@ -262,11 +266,30 @@ function buildElectroscope() {
   const brass = material('#c79643', .82, .22);
   const stemMetal = material('#aab7c0', .88, .2);
   const caseGlass = material('#a9c8d7', .05, .16, .16);
+  caseGlass.forceSinglePass=true;
   const caseEdge = material('#58748a', .52, .32);
   const foil = material('#d7b45a', .82, .19);
   const insulation = material('#eee4cb', .05, .35);
-  const positiveMat = material('#e76452', .04, .28);
-  const negativeMat = material('#4aa9e8', .06, .28);
+  // Shared camera-facing sphere impostors keep polarity readable at every angle.
+  // Textures are created once; no canvas allocation or text drawing per frame.
+  const chargeMaterials=[1,-1].map(sign=>{
+    const size=64,data=new Uint8Array(size*size*4),color=sign>0?[218,67,64]:[20,114,219];
+    for(let y=0;y<size;y++)for(let x=0;x<size;x++){
+      const u=(x+.5-size/2)/(size/2),v=(y+.5-size/2)/(size/2),r=Math.hypot(u,v),i=(y*size+x)*4;
+      const glyph=(Math.abs(u)<.49&&Math.abs(v)<.095)||(sign>0&&Math.abs(v)<.49&&Math.abs(u)<.095);
+      const light=.79+.21*Math.sqrt(Math.max(0,1-r*r))+.17*Math.exp(-((u+.32)**2+(v+.38)**2)/.10);
+      for(let c=0;c<3;c++)data[i+c]=glyph?255:Math.min(255,color[c]*light);
+      data[i+3]=Math.round(255*Math.max(0,Math.min(1,(1-r)*size/2)));
+    }
+    const map=new THREE.DataTexture(data,size,size);map.colorSpace=THREE.SRGBColorSpace;map.needsUpdate=true;
+    map.magFilter=map.minFilter=THREE.LinearFilter;
+    return new THREE.SpriteMaterial({map,depthTest:true,depthWrite:false,toneMapped:false});
+  });
+  const chargeMarker=(parent,sign,pos,radius=.011)=>{
+    const group=new THREE.Group();group.position.set(...pos);group.userData.chargeSign=sign;group.userData.nonPickable=true;
+    const sprite=new THREE.Sprite(chargeMaterials[sign>0?0:1]);sprite.scale.set(radius*2,radius*2,1);sprite.userData.nonPickable=true;
+    group.add(sprite);parent.add(group);return group;
+  };
 
   const base = assembly(root, 'base', '绝缘底座', '支承玻璃盒并与验电器金属部分绝缘。', [0, -.2, 0]); parts.push(base);
   cylinder(base.object, .32, .09, [0, .045, 0], wood);
@@ -308,12 +331,13 @@ function buildElectroscope() {
   for (let i = 0; i < 7; i++) box(scalePart.object, [.025 + (i % 2) * .014, .004, .012], [.19 + .008 * (i % 2), .22 + i * .05, -.028], material('#c5d2d9', .25, .42));
 
   const rod = assembly(root, 'test-rod', '外部带电棒', '移动的棒保持不接触，或按操作选择接触金属球。', [-.33, .04, .12]); parts.push(rod);
-  const rodMotion = new THREE.Group(); rod.object.add(rodMotion);
+  const rodMotion = new THREE.Group();rodMotion.name='electroscope-rod-motion'; rod.object.add(rodMotion);
   cylinder(rodMotion, .017, .40, [-.21, .79, 0], material('#d1a978', .12, .36), 'x');
   cylinder(rodMotion, .027, .07, [-.015, .79, 0], brass, 'x');
-  const positiveTip = sphere(rodMotion, .018, [-.014, .79, .033], positiveMat);
-  const negativeTip = sphere(rodMotion, .018, [-.014, .79, .033], negativeMat);
+  const positiveTip = chargeMarker(rodMotion,1,[-.014,.79,.033],.018);
+  const negativeTip = chargeMarker(rodMotion,-1,[-.014,.79,.033],.018);
   positiveTip.userData.nonPickable = negativeTip.userData.nonPickable = true;
+  positiveTip.userData.hideWhenExploded = negativeTip.userData.hideWhenExploded = true;
   for (let i = 0; i < 4; i++) torus(rodMotion, .022, .003, [-.36 + i * .09, .79, 0], insulation, [0, Math.PI / 2, 0]);
 
   const ground = assembly(root, 'ground-wire', '可拆接地线', '感应充电时，在带电棒仍靠近的情况下先接地，再先断开地线。', [.34, -.15, -.1]);
@@ -324,36 +348,67 @@ function buildElectroscope() {
 
   const bodyMarks = assembly(root, 'body-charge-markers', '金属杆电荷分布示意', '红蓝点表示电荷分布方向，不表示真实粒子数。', [0, 0, -.02]);
   bodyMarks.object.userData.nonPickable = true; parts.push(bodyMarks);
+  bodyMarks.object.userData.hideWhenExploded=true;
   const bodyPositive = new THREE.Group(), bodyNegative = new THREE.Group(); bodyMarks.object.add(bodyPositive, bodyNegative);
-  for (const y of [.73, .75, .77, .79, .81, .83]) {
-    sphere(bodyPositive,.009,[.018,y,Math.sqrt(.072**2-.018**2-(y-.79)**2)+.006],positiveMat);
-    sphere(bodyNegative,.009,[-.018,y,Math.sqrt(.072**2-.018**2-(y-.79)**2)+.006],negativeMat);
+  // Opposite pairs appear first so even a small charge spans the ball surface.
+  // Both polarities use exactly the same positions, radius and units-to-markers ratio.
+  const surfaceSites=[[-.037,.035,1],[.037,-.035,1],[.037,.035,1],[-.037,-.035,1],
+    [0,.070,1],[0,-.070,1],[-.070,0,1],[.070,0,1],
+    [-.037,.035,-1],[.037,-.035,-1],[.037,.035,-1],[-.037,-.035,-1]];
+  for (const [x,y,side] of surfaceSites) {
+    const pos=[x,.79+y,side*Math.sqrt(.083**2-x*x-y*y)];
+    chargeMarker(bodyPositive,1,pos);chargeMarker(bodyNegative,-1,pos);
   }
   const leafPositiveL = new THREE.Group(), leafPositiveR = new THREE.Group(), leafNegativeL = new THREE.Group(), leafNegativeR = new THREE.Group();
   leftLeaf.add(leafPositiveL, leafNegativeL); rightLeaf.add(leafPositiveR, leafNegativeR);
-  for (let i = 0; i < 3; i++) {
-    sphere(leafPositiveL, .008, [-.012, -.07 - .055 * i, .012], positiveMat);
-    sphere(leafPositiveR, .008, [.012, -.07 - .055 * i, .012], positiveMat);
-    sphere(leafNegativeL, .008, [-.012, -.07 - .055 * i, .012], negativeMat);
-    sphere(leafNegativeR, .008, [.012, -.07 - .055 * i, .012], negativeMat);
+  for(const g of [leafPositiveL,leafNegativeL,leafPositiveR,leafNegativeR])g.userData.hideWhenExploded=true;
+  for (let i = 0; i < 6; i++) {
+    for(const [positive,negative,x] of [[leafPositiveL,leafNegativeL,-.012],[leafPositiveR,leafNegativeR,.012]]){
+      const pos=[x,-.05-.029*i,.015];
+      chargeMarker(positive,1,pos);chargeMarker(negative,-1,pos);
+    }
+  }
+
+  const electronFlow=new THREE.Group();electronFlow.name='electroscope-electron-flow';
+  electronFlow.userData.nonPickable=true;electronFlow.userData.hideWhenExploded=true;
+  bodyMarks.object.add(electronFlow);
+  const electronPackets=[];
+  for(const side of [-1,1])for(let i=0;i<6;i++){
+    const dot=chargeMarker(electronFlow,-1,[0,0,0]);
+    electronPackets.push({dot,side,index:i});
   }
 
   const lesson = { root, parts, update(_t, inputs = {}) {
     const state = electroscopeState(inputs);
-    rodMotion.position.x = state.contact ? -.092 : state.rodAway ? -.60 : -.14;
-    positiveTip.visible = state.sign === 'positive'; negativeTip.visible = state.sign === 'negative';
+    const visual=electroscopeVisual(inputs,electroscopeState);
+    rodMotion.position.x = visual.rodX;
+    positiveTip.visible = positiveTip.userData.modelVisible = state.sign === 'positive'; negativeTip.visible = negativeTip.userData.modelVisible = state.sign === 'negative';
     ground.object.visible = ground.object.userData.modelVisible = state.grounding;
-    const leafVisiblePositive = state.leafSign === 'positive';
-    const leafVisibleNegative = state.leafSign === 'negative';
-    leafPositiveL.visible = leafPositiveR.visible = leafVisiblePositive;
-    leafNegativeL.visible = leafNegativeR.visible = leafVisibleNegative;
-    bodyPositive.visible = state.bodySign === 'positive';
-    bodyNegative.visible = state.bodySign === 'negative';
-    [bodyPositive,bodyNegative].forEach(g=>g.children.forEach((m,i)=>{m.visible=i<Math.abs(state.bodyCharge);}));
-    [leafPositiveL,leafPositiveR,leafNegativeL,leafNegativeR].forEach(g=>g.children.forEach((m,i)=>{m.visible=i<Math.abs(state.leafCharge);}));
-    const angle = state.angle;
+    const charges=(g,amount)=>{g.visible=g.userData.modelVisible=amount>1e-6;g.children.forEach((m,i)=>{const portion=Math.max(0,Math.min(1,amount-i));m.visible=portion>1e-6;m.scale.setScalar(Math.cbrt(portion));});};
+    charges(bodyPositive,2*Math.max(0,visual.bodyCharge));charges(bodyNegative,2*Math.max(0,-visual.bodyCharge));
+    for(const g of [leafPositiveL,leafPositiveR])charges(g,2*Math.max(0,visual.leafCharge));
+    for(const g of [leafNegativeL,leafNegativeR])charges(g,2*Math.max(0,-visual.leafCharge));
+    const angle = visual.angle;
     leftLeaf.rotation.z = -angle;
     rightLeaf.rotation.z = angle;
+    const flow=electroscopeElectronFlow(inputs,electroscopeState);
+    electronFlow.visible=electronFlow.userData.modelVisible=flow.direction!==0;
+    electronFlow.userData.direction=flow.direction;
+    for(const {dot,side,index} of electronPackets){
+      const travel=(flow.progress-index*.055)/.725;
+      dot.visible=travel>0&&travel<1;
+      const u=Math.max(0,Math.min(1,flow.direction>0?travel:1-travel));
+      // Follow the conducting ball, rod and the currently rotated foil face.
+      const distance=u*.59;
+      if(distance<=.385){
+        const y=.79-distance;
+        dot.position.set(side*.009,y,y>.72?Math.sqrt(Math.max(0,.072**2-(y-.79)**2))+.012:.026);
+      }else{
+        const length=distance-.385;
+        dot.position.set(side*(.009*Math.cos(angle)+length*Math.sin(angle)),.405+.009*Math.sin(angle)-length*Math.cos(angle),.016);
+      }
+      dot.scale.setScalar(Math.min(1,Math.max(0,travel)*12,Math.max(0,1-travel)*12));
+    }
     return electroscopeReadout(_t, inputs);
   } };
   lesson.update(0, {});
@@ -407,14 +462,15 @@ function buildRheostat() {
   box(base.object, [.50, .018, .06], [0, .091, .195], material('#c7b391', .04, .54));
 
   const tubePart = assembly(root, 'ceramic-tube', '瓷管与电阻丝', '电阻丝绕在绝缘瓷管上；所选绕组端至滑片的部分串入电路。', [0, .10, -.08]); parts.push(tubePart);
-  cylinder(tubePart.object, .088, RHEOSTAT_COIL_AXIAL_LENGTH_M, [0, .34, 0], ceramic, 'x');
+  cylinder(tubePart.object, .088, RHEOSTAT_COIL_AXIAL_LENGTH_M, [0, .34, 0], ceramic, 'x').name='rheostat-ceramic-core';
   for (const x of [-.405, .405]) torus(tubePart.object, .098, .011, [x, .34, 0], material('#c5b9a1', .08, .38), [0, Math.PI / 2, 0]);
   const windingPoints=[];
   for(let i=0;i<=RHEOSTAT_TURNS*48;i++){const u=i/(RHEOSTAT_TURNS*48),a=2*Math.PI*RHEOSTAT_TURNS*u; windingPoints.push([-.39+.78*u,.34+.095*Math.cos(a),.095*Math.sin(a)]);}
   const winding=pathTube(tubePart.object,windingPoints,.0067,nichrome); winding.name='resistance-winding';
   const activeWinding=pathTube(tubePart.object,windingPoints,.007,material('#ef8353',.3,.24)); activeWinding.name='active-winding';
+  activeWinding.userData.hideWhenExploded=true;
   const activeTurnMarkers=[];
-  for (const x of [-.39,.39]) pathTube(tubePart.object,[[x,.435,0],[x,.435,.19],[Math.sign(x)*.45,.193,.19]],.009,brass);
+  for (const x of [-.39,.39]) pathTube(tubePart.object,[[x,.435,0],[x,.435,.19],[Math.sign(x)*.45,.193,.19]],.009,brass).userData.hideWhenExploded=true;
 
   const supports = assembly(root, 'porcelain-supports', '瓷质支架', '支架承托绕线瓷管和跨在其上方的金属导轨。', [0, .11, -.17]); parts.push(supports);
   for (const x of [-.45, .45]) {
@@ -473,7 +529,7 @@ function buildRheostat() {
   const loadToA = pathTube(circuit.object, [[.21, .19, .31], [.28, .19, .40], [-.28, .19, .40], [-.42, .16, .30], [-.45, .12, .19]], .009, material('#d75b4d', .1, .4));
   const loadToB = pathTube(circuit.object, [[.21, .19, .31], [.30, .18, .28], [.41, .15, .23], [.45, .12, .19]], .009, material('#d75b4d', .1, .4));
   const loadToSource = pathTube(circuit.object, [[-.14, .205, .31], [-.18, .12, .28], [-.22, .10, .12], [-.32, .10, -.15], [-.45, .12, -.19]], .009, material('#527da2', .1, .4));
-  for (const lead of [sourceToLoad, loadToA, loadToB, loadToSource]) lead.userData.nonPickable = true;
+  for (const lead of [sourceToLoad, loadToA, loadToB, loadToSource]) {lead.userData.nonPickable = true;lead.userData.hideWhenExploded=true;}
   const variableBranches = [loadToA, loadToB];
 
   let lastVisualKey = '';
@@ -482,11 +538,11 @@ function buildRheostat() {
     const visualKey = `${state.position}|${state.end}`;
     if (visualKey !== lastVisualKey) {
       wiperMotion.position.x = -.39 + .78 * state.position;
-      variableBranches[0].visible = state.end === 'A';
-      variableBranches[1].visible = state.end === 'B';
+      variableBranches[0].visible = variableBranches[0].userData.modelVisible = state.end === 'A';
+      variableBranches[1].visible = variableBranches[1].userData.modelVisible = state.end === 'B';
       const cut=Math.round(state.position*(windingPoints.length-1));
       const activePoints=state.end==='A'?windingPoints.slice(0,cut+1):windingPoints.slice(cut);
-      activeWinding.visible=activePoints.length>1;
+      activeWinding.visible=activeWinding.userData.modelVisible=activePoints.length>1;
       if(activePoints.length>1) setTubePoints(activeWinding,activePoints,.007,Math.max(24,activePoints.length));
       lastVisualKey = visualKey;
     }
@@ -557,7 +613,7 @@ function buildPulley() {
 
   const fixed = assembly(root, 'fixed-sheave', '定滑轮与轴承', '固定在顶梁的滑轮改变拉力方向；它本身不增加理想机械利益。', [.28, .05, .12]); parts.push(fixed);
   const fixedSpin = new THREE.Group(); fixedSpin.position.set(.24, 1.16, 0); fixed.object.add(fixedSpin);
-  cylinder(fixedSpin, .111, .09, [0, 0, 0], steel, 'z');
+  cylinder(fixedSpin, .111, .09, [0, 0, 0], steel, 'z').name='pulley-fixed-wheel-body';
   for (const z of [-.052, .052]) {
     torus(fixedSpin, .128, .012, [0, 0, z], brass);
     torus(fixedSpin, .084, .006, [0, 0, z * 1.05], steel);
@@ -571,7 +627,7 @@ function buildPulley() {
   const moving = assembly(root, 'moving-block', '动滑轮、滑块和负载', '动滑轮由两段绳子承托，随负载上升。', [0, -.06, .06]); parts.push(moving);
   const movingLift = new THREE.Group(); moving.object.add(movingLift);
   const wheelSpin = new THREE.Group(); wheelSpin.position.set(0, 0, 0); movingLift.add(wheelSpin);
-  cylinder(wheelSpin, .111, .085, [0, 0, 0], steel, 'z');
+  cylinder(wheelSpin, .111, .085, [0, 0, 0], steel, 'z').name='pulley-moving-wheel-body';
   for (const z of [-.05, .05]) {
     torus(wheelSpin, .128, .012, [0, 0, z], brass);
     torus(wheelSpin, .085, .006, [0, 0, z * 1.05], steel);
@@ -657,7 +713,7 @@ export const devices = [
     build: buildHob, readout: hobReadout,
   },
   {
-    id: 'electroscope', name: '金属箔验电器', category: 'electromagnetic',
+    id: 'electroscope', name: '金属箔验电器', category: 'electromagnetic', maxRenderPixels:2400000,
     summary: '比较带电棒靠近、接触和感应充电时，金属箔片的不同状态。',
     principle: '导体中的电子能够移动。靠近而未接触会重新分布电荷但保持总净电荷；接触可传递电荷；感应充电时要在棒仍靠近时接地，先断开地线再移开棒。',
     notes: '电荷用颜色点表示分布方向，点数表示守恒的相对净电荷单位，不是电子个数。箔片张角是夸大的定性响应，没有反推静电力或净电荷。操作菜单选择完整实验中的指定状态；“只靠近后移开”和“接触后移开”分别保留各自前置过程。自动实验之间明确接地放电。',

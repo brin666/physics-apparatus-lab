@@ -3,21 +3,24 @@ import {catalog,categories} from './catalog.mjs';
 import {createApparatusScene} from './scene.mjs';
 import {createWhiteboard} from '../whiteboard.mjs';
 import {hasGuidedOperation} from './preview-inputs.mjs';
+import {mountPlaybackTimeline} from '../playback-timeline.mjs';
 const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)],params=new URLSearchParams(location.search),preview=params.has('preview'),staticView=params.has('thumbnail'),definition=findDevice(document.body.dataset.apparatus);
 if(preview||staticView)document.body.classList.add('preview');
-let scene,whiteboard,renderId=0,ready=false;
+let scene,whiteboard,timeline,renderId=0,ready=false;
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function controlMarkup(c){return `<label class="variable-control" for="input-${c.id}"><span>${esc(c.label)}${c.options?'':`<output id="value-${c.id}"></output>`}</span>${c.options?`<select id="input-${c.id}" data-input="${c.id}">${c.options.map(o=>`<option value="${esc(o.value)}">${esc(o.label)}</option>`).join('')}</select>`:`<input id="input-${c.id}" data-input="${c.id}" type="range" min="${c.min}" max="${c.max}" step="${c.step||.01}" value="${c.value}">`}</label>`;}
 function selected(part){$('#part-inspector').hidden=!part;if(part){$('#part-name').textContent=part.name;$('#part-function').textContent=part.description;}$$('[data-part]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.part===part?.id)));}
 function togglePanel(name,on){const panel=$(`#${name}-panel`),button=$(`#${name}-toggle`);panel.hidden=!on;button.setAttribute('aria-expanded',String(on));if(on){const other=name==='lesson'?'variables':'lesson';$(`#${other}-panel`).hidden=true;$(`#${other}-toggle`).setAttribute('aria-expanded','false');}}
 function lessonReadout(){return scene.model.readout?.(scene.state.t,scene.state.inputs)??definition.readout(scene.state.t,scene.state.inputs);}
 function render(){if(!scene)return;const {state}=scene,isIntro=state.phase==='intro',exploded=state.mode==='explode',moving=['opening','closing'].includes(state.phase),running=state.playing&&!moving&&!exploded;
+ if(definition.actions){const actions=$('#teaching-actions');if(actions){actions.hidden=isIntro||exploded||moving;actions.querySelectorAll('button').forEach(b=>{b.disabled=state.frozen;b.setAttribute('aria-pressed',String((state.action?.id||'cycle')===b.dataset.action));});}}
+ timeline?.({progress:scene.progress(),hidden:isIntro||exploded||moving,disabled:state.frozen,text:lessonReadout().title});
  document.body.classList.toggle('playing',running);document.body.classList.toggle('paused',!running||state.frozen);$('#play-text').textContent=exploded?'组装运行':moving?'正在组装':running?(isIntro?'暂停组装':'暂停演示'):(isIntro?'继续组装':'播放演示');$('#play').disabled=moving;
- $$('[data-part]').forEach(b=>{const part=scene.records.find(r=>r.id===b.dataset.part);b.hidden=part?.object.userData.modelVisible===false||!!part?.object.userData.hideWhenExploded&&(exploded||moving);});
+ $$('[data-part]').forEach(b=>{const part=scene.records.find(r=>r.id===b.dataset.part);b.hidden=part?.object.userData.modelVisible===false||!!part?.object.userData.studyHidden||!!part?.object.userData.hideWhenExploded&&(exploded||moving);});
  $('#part-tools').hidden=!exploded;$('#part-reset').disabled=!state.selected;$('.speed-label').hidden=exploded;
  $$('[data-mode]').forEach(b=>{b.setAttribute('aria-pressed',String(b.dataset.mode===state.mode));if(b.dataset.mode==='explode')b.textContent=exploded?'装回':'拆解';if(b.dataset.mode==='cut')b.textContent=definition.cutLabel||'剖切';});
  const section=definition.id==='dc-motor'&&state.mode==='cut'&&!isIntro;$('#section-legend').hidden=!section;
- $('#skip-intro').hidden=!isIntro;$('#stage-subtitle').textContent=isIntro?'组装入场':exploded?'总成拆解 · 自由观察':section?'横截面示意 · 两侧有效导线截面已放大':definition.summary;
+ $('#skip-intro').hidden=!isIntro;$('#stage-subtitle').textContent=isIntro?'组装入场':exploded?'总成拆解 · 自由观察':section?'横截面示意 · 两侧有效导线截面已放大':(definition.viewDescriptions?.[state.mode]||definition.summary);
  const lesson=lessonReadout(),parts=scene.records,step=isIntro?Math.min(parts.length-1,Math.floor(state.elapsed/3.8*parts.length)):Math.max(0,Math.min(definition.stages.length-1,lesson.phaseIndex||0));
  $('#caption-title').textContent=isIntro?parts[step].name:exploded?'拆开，观察部件的连接':lesson.title;
  $('#caption-text').textContent=isIntro?parts[step].description:exploded?'按住零件旋转，切换「移动」调整位置，再组装回去。':lesson.text;
@@ -35,6 +38,8 @@ try{
  $('#device-controls').innerHTML=definition.controls.map(controlMarkup).join('')+(hasGuidedOperation(definition.id)?'<p class="variable-hint">调节参数会暂停自动演示；点击播放继续。</p>':'');$('#principle').textContent=definition.principle;$('#model-notes').textContent=definition.notes;
  $('#source-list').innerHTML=(definition.sources||[]).map(s=>`<li><a href="${esc(s.url)}" target="_blank" rel="noreferrer">${esc(s.label)} ↗</a></li>`).join('');
  scene=createApparatusScene($('#device-canvas'),definition,{onSelect:selected,onInput:render,onChange:render,preview:preview||staticView,staticView});
+ timeline=mountPlaybackTimeline($('.teaching-progress'),value=>scene.seek(value));
+ if(definition.actions){const actions=document.createElement('div');actions.id='teaching-actions';actions.className='teaching-actions';actions.innerHTML=definition.actions.map(a=>`<button data-action="${a.id}">${a.label}</button>`).join('')+'<button data-action="cycle">循环演示</button>';$('.device-stage').append(actions);actions.addEventListener('click',e=>{const b=e.target.closest('[data-action]');if(b)scene.runAction(b.dataset.action==='cycle'?null:b.dataset.action);});}
  if(matchMedia('(prefers-reduced-motion:reduce)').matches&&!preview&&!staticView){scene.state.phase='closed';scene.state.playing=false;scene.state.mode=definition.defaultMode||'assembled';}
  $('#part-list').innerHTML=scene.records.map(p=>`<button data-part="${p.id}" aria-pressed="false">${esc(p.name)}</button>`).join('');
  $$('[data-input]').forEach(el=>el.addEventListener('input',()=>scene.setInput(el.dataset.input,el.value)));
@@ -43,7 +48,7 @@ try{
  $$('[data-view]').forEach(b=>b.addEventListener('click',()=>scene.view(b.dataset.view)));
  $$('[data-tool]').forEach(b=>b.addEventListener('click',()=>{scene.state.tool=b.dataset.tool;$$('[data-tool]').forEach(x=>x.setAttribute('aria-pressed',String(x===b)));}));
  $('#part-reset').addEventListener('click',()=>scene.resetPart());$('#inspector-close').addEventListener('click',()=>scene.select(null));
- $('#play').addEventListener('click',()=>{scene.select(null);if(scene.state.mode==='explode')scene.assemble();else scene.state.playing=!scene.state.playing;render();});$('#speed').addEventListener('change',e=>scene.state.speed=Number(e.target.value));
+ $('#play').addEventListener('click',()=>{scene.select(null);if(scene.state.mode==='explode')scene.assemble();else if(scene.state.action&&scene.state.t>=scene.state.action.start+12)scene.runAction(null);else scene.state.playing=!scene.state.playing;render();});$('#speed').addEventListener('change',e=>scene.state.speed=Number(e.target.value));
  for(const name of ['lesson','variables']){$(`#${name}-toggle`).addEventListener('click',()=>togglePanel(name,$(`#${name}-panel`).hidden));$(`#${name}-close`).addEventListener('click',()=>togglePanel(name,false));}
  $('#replay').addEventListener('click',()=>{togglePanel('lesson',false);scene.intro();});$('#skip-intro').addEventListener('click',()=>{scene.state.elapsed=3.8;scene.state.playing=true;});
  if(!preview&&!staticView){

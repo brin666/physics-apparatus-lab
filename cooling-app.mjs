@@ -3,6 +3,7 @@ import {COOLING_MACHINES,getCoolingLesson,coolingAt,assemblyAt,ASSEMBLY_DURATION
 import {createWhiteboard} from './whiteboard.mjs';
 import {mountSpeedControl} from './speed-control.mjs';
 import {mountCycleProgress} from './cycle-progress.mjs';
+import {mountPlaybackTimeline} from './playback-timeline.mjs';
 import {coolingAssemblyOwners} from './cooling-exploration.mjs';
 const $=selector=>document.querySelector(selector),$$=selector=>[...document.querySelectorAll(selector)];
 const kind=document.body.dataset.machine==='ac'?'ac':'fridge',machine=COOLING_MACHINES[kind],displayName=kind==='ac'?'空调':machine.name;
@@ -13,6 +14,7 @@ const DEFAULT_MODE='xray';
 const state={kind,operation:'cool',progress:0,playing:false,speed:1,mode:reduced.matches?DEFAULT_MODE:'cut',selected:null,view:'3d',visible:true,labels:true,reduced:reduced.matches,interaction:'lesson',chapter:'cycle',assembly:{active:!reduced.matches,time:0,running:!reduced.matches}};
 const frame=$('#machine'),CYCLE_SECONDS=16;
 let explorationPhase='closed',resumeAfterAssembly=false;
+let timeline=null;
 let ready=false,raf=0,lastTime=0,lastPost=0,hasPlayed=false,lessonOpen=false,lessonSection='structure',closeTimer=0,lastStage='',lastAssembly=-1,reveal=false,whiteboard;
 $('#parts').innerHTML=machine.parts.map(part=>`<button data-part-id="${part.id}" aria-pressed="false"><span>${part.no}</span>${part.name}</button>`).join('');
 $('#stages').innerHTML=getCoolingLesson(kind).stages.map((stage,i)=>`<button data-stage="${i}" aria-pressed="false">${stage.name}</button>`).join('');
@@ -142,6 +144,7 @@ function toggleAssembly(){
   if(!state.assembly.running)stopClock();render();post(true);kick();
 }
 function render(){
+  timeline?.({progress:state.progress,hidden:state.assembly.active||state.mode==='explode'||explorationPhase!=='closed',disabled:state.interaction==='whiteboard',text:coolingAt(state).stage.name});
   const a=assemblyAt(kind,state.assembly.time),model=coolingAt(state),stage=model.stage,active=state.assembly.active;
   $$('button[data-mode]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.mode===state.mode)));
   document.body.classList.toggle('is-assembling',active);document.body.classList.toggle('is-playing',state.playing);
@@ -262,6 +265,7 @@ document.addEventListener('visibilitychange',()=>{state.visible=!document.hidden
 reduced.addEventListener('change',()=>{state.reduced=reduced.matches;if(state.reduced){state.playing=false;state.assembly.running=false;stopClock();}render();post(true);});
 if(window.COOLING_DOCUMENT)frame.srcdoc=window.COOLING_DOCUMENT;else frame.src='./refrigeration-machine.html?machine='+kind;
 syncTabs();updatePart();render();
+timeline=mountPlaybackTimeline($('#cycle-overview'),setProgress);render();
 window.coolingDemo={state,machine,coolingAt,getCoolingLesson,setMode,setPlaying,setProgress,setOperation,selectPart,showView,showLesson,setLessonSection,startAssembly,finishAssembly,seekAssembly,whiteboard,get ready(){return ready;}};
 
 

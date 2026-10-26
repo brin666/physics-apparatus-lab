@@ -1,4 +1,8 @@
 import { THREE, material, box, cylinder, sphere, torus, pipe, assembly } from './kit.mjs';
+import {createSubmarineTeaching} from './submarine-teaching.mjs';
+import {submarineActions} from './submarine-actions.mjs';
+import {SUB_LAYOUT,submarineWetVolume,inverseFraction} from './submarine-layout.mjs';
+import {buildSubmarineVessel} from './submarine-geometry.mjs';
 
 // The geometry is a metre-based teaching schematic. Solver constants are
 // declared beside the equations below; they are not claims about a vessel or
@@ -43,7 +47,8 @@ export function submarineState(t = 0, inputs = {}) {
   // Exterior water plus tank water is conserved, including water drawn into ballast.
   const surfaceY = SUB_EMPTY_LEVEL + (displacedVolumeM3 - ballastVolumeM3) / SUB_AREA;
   const displacedFraction = displacedVolumeM3 / SUB_DISPLACEMENT_M3;
-  const releaseY = surfaceY + SUB_HULL_HEIGHT / 2 - displacedVolumeM3 / 0.40;
+  const immersion=inverseFraction(displacedVolumeM3/SUB_DISPLACEMENT_M3,u=>submarineWetVolume(u*SUB_HULL_HEIGHT/2)/SUB_DISPLACEMENT_M3);
+  const releaseY=surfaceY-immersion*SUB_HULL_HEIGHT/2;
   // Independent release experiment, linear drag Fd = c v, no invented equilibrium depth.
   const elapsed = Math.max(0, Number.isFinite(t) ? t : 0), drag = 120;
   const downwardN = Math.max(0, -fullSubmergedMarginN), tau = totalMassKg / drag;
@@ -57,7 +62,7 @@ export function submarineState(t = 0, inputs = {}) {
     sinkDepthM: releaseY - centerY, bottomReactionN: onBottom ? downwardN : 0,
     externalWaterVolumeM3: SUB_AREA * (surfaceY - SUB_FLOOR) - displacedVolumeM3 };
 }
-// Solve exterior water conservation together with actual box immersion.
+// Solve water conservation with the rounded, elliptical capsule immersion.
 // A*S - A*emptyLevel = displacedVolume - ballastVolume.
 export function submarineHydrostatics(centerY, ballastKg = 10, velocityY = 0) {
   ballastKg = clamp(ballastKg, 0, 32);
@@ -65,9 +70,15 @@ export function submarineHydrostatics(centerY, ballastKg = 10, velocityY = 0) {
   const bottom = centerY - SUB_HULL_HEIGHT / 2, top = centerY + SUB_HULL_HEIGHT / 2;
   const drySurface = SUB_EMPTY_LEVEL - ballastVolumeM3 / SUB_AREA;
   const fullSurface = SUB_EMPTY_LEVEL + (SUB_DISPLACEMENT_M3 - ballastVolumeM3) / SUB_AREA;
-  const surfaceY = drySurface <= bottom ? drySurface : fullSurface >= top ? fullSurface
-    : (SUB_AREA * SUB_EMPTY_LEVEL - ballastVolumeM3 - 0.40 * bottom) / (SUB_AREA - 0.40);
-  const displacedVolumeM3 = 0.40 * clamp(surfaceY - bottom, 0, SUB_HULL_HEIGHT);
+  let surfaceY;
+  if(drySurface<=bottom)surfaceY=drySurface;
+  else if(fullSurface>=top)surfaceY=fullSurface;
+  else{
+    let lo=drySurface,hi=fullSurface;
+    for(let i=0;i<32;i++){const mid=(lo+hi)/2,conserved=SUB_EMPTY_LEVEL+(submarineWetVolume(mid-centerY)-ballastVolumeM3)/SUB_AREA;if(mid<conserved)lo=mid;else hi=mid;}
+    surfaceY=(lo+hi)/2;
+  }
+  const displacedVolumeM3=submarineWetVolume(surfaceY-centerY);
   const buoyancyN = SUB_RHO * SUB_G * displacedVolumeM3, weightN = totalMassKg * SUB_G;
   const maxBuoyancyN = SUB_RHO * SUB_G * SUB_DISPLACEMENT_M3;
   const netBuoyancyN = buoyancyN - weightN;
@@ -111,64 +122,65 @@ export function createSubmarineDynamics() {
     time=Math.max(0,Number.isFinite(t)?t:0);y=Math.max(SUB_FLOOR+SUB_HULL_HEIGHT/2,saved.y);
     velocity=saved.velocity;ballast=clamp(value(inputs,'ballast',saved.ballast),0,32);refresh();
   }
-  return {update,reset,snapshot,restore,state:()=>current?{...current}:null};
+  function seek(t,inputs,sample){
+    reset(0,sample(0));
+    for(let i=1;i<=Math.ceil(t*120);i++){const at=Math.min(t,i/120);update(at,sample(at));}
+    update(t,inputs);
+  }
+  function seekFrom(saved,start,t,sample){
+    restore(saved,start,sample(start));
+    for(let i=1;i<=Math.ceil((t-start)*120);i++){const at=Math.min(t,start+i/120);update(at,sample(at));}
+  }
+  return {update,reset,snapshot,restore,seek,seekFrom,state:()=>current?{...current}:null};
 }
 function buildSubmarine() {
-  const root = new THREE.Group(), parts = [], moving = [];
-  const navy = material('#36596d', .55, .3), steel = material('#a7b4bb', .7, .3);
-  const glass = material('#a9d7e8', .03, .2, .14), water = material('#378ec2', .02, .2, .28);
-  const brass = material('#c39a55', .65, .3), dark = material('#263c49', .3, .4);
-  water.polygonOffset=true;water.polygonOffsetFactor=-1;water.polygonOffsetUnits=-1;
-  const make = (id, name, text, offset, shell = false) => { const p = assembly(root, id, name, text, offset, shell); parts.push(p); return p; };
-  const motion = part => { const g = nested(part); moving.push(g); return g; };
-  const basin = make('basin', '透明教学水槽', '水槽水量守恒：压载舱进水从外部水体扣除，艇身排水体积从外水几何中挖空。', [0,-.08,0]);
-  volumeBox(basin.object, [1.84,.06,.80], [0,.09,0], dark);
-  for (const z of [-.39,.39]) volumeBox(basin.object,[1.84,1.15,.02],[0,.695,z],glass);
-  for (const x of [-.91,.91]) volumeBox(basin.object,[.02,1.15,.76],[x,.695,0],glass);
-  // Six disjoint rectangular volumes surround the one-metre box submarine.
-  const externalWater = Array.from({length:6}, (_,i) => nonPickable(volumeBox(basin.object,[1,1,1],[0,0,0],water,`sub-water-${i}`)));
-  externalWater.forEach(m => m.userData.connection = true);
-  const hull = make('pressure-hull','方形耐压教学舱','中央密封舱 1 × 0.24 × 0.20 m；两侧压载舱合计后外包络为 0.080 m³。',[0,.03,0],true);
-  volumeBox(motion(hull),[1,.20,.24],[0,0,0],navy,'sub-displacement-hull');
-  const ballast = make('ballast-tanks','两侧压载舱','每舱容积 0.016 m³；海水总容量 32.8 kg。水从底部进出，封闭空气空间位于水面上方。',[0,.02,.22],true);
-  const bm = motion(ballast), fills=[];
-  for (const z of [-.16,.16]) {
-    volumeBox(bm,[1,.20,.08],[0,0,z],glass);
-    const f = volumeBox(bm,[1,1,.08],[0,0,z],water,`sub-ballast-${z}`); fills.push(f);
-  }
-  const vents=make('vents-and-floods','通气口与进排水口','上下口是理想薄壁边界；本滑杆选择压载状态，不演示真实吹除的气体热力过程。',[0,.05,-.22]);
-  const vm=motion(vents);
-  for (const z of [-.16,.16]) {
-    ring(vm,.017,.012,.008,[.28,.104,z],brass);
-    ring(vm,.017,.012,.008,[-.28,-.104,z],brass);
-  }
-  const air=make('air-bank','压缩空气瓶与分支管','空气瓶置于中央舱内，分支管接入两侧舱顶。',[0,.18,.20]);
-  const am=motion(air); cylIn(am,.035,.32,[-.17,0,0],brass,'x');
-  for (const z of [-.16,.16]) pipe(am,[[-.01,0,0],[.06,.065,0],[.16,.065,z],[.28,.10,z]],.008,brass);
-  const sail=make('sail','示意识别架','开放框架表示艇上结构；忽略薄壁附件的体积与阻力，定量排水仅计方形包络。',[0,.16,0]);
-  const sm=motion(sail);
-  for(const x of [-.1,.1]) boxIn(sm,[.012,.14,.012],[x,.17,0],steel);
-  boxIn(sm,[.212,.012,.012],[0,.24,0],steel);
-  const prop=make('propulsion','教学尾部标记','尾部开放式标记不参与静水浮力计算；此装置只研究竖直浮沉。',[.12,0,0]);
-  const pm=motion(prop); boxIn(pm,[.012,.12,.012],[.52,0,0],brass);
-  const dynamics=createSubmarineDynamics();
-  return {root,parts,physicsState:dynamics.state,snapshot:dynamics.snapshot,restore:dynamics.restore,reset:dynamics.reset,
-    readout:()=>submarineReadoutState(dynamics.state()||submarineHydrostatics(submarineState().centerY)),
-    update(t=0,inputs={}) {
-    const s=dynamics.update(t,inputs); moving.forEach(g=>g.position.y=s.centerY);
-    fills.forEach(f=>{ const h=s.ballastVolumeM3/(2*.08); f.scale.y=h; f.position.y=-.1+h/2; f.visible=h>0;f.userData.modelVisible=f.visible; });
-    const bottom=s.centerY-.1, top=s.centerY+.1, wetTop=Math.min(top,s.surfaceY);
-    const set=(i,x0,x1,y0,y1,z0,z1)=>{const m=externalWater[i];m.visible=y1>y0+1e-9;m.userData.modelVisible=m.visible;m.scale.set(x1-x0,Math.max(0,y1-y0),z1-z0);m.position.set((x0+x1)/2,(y0+y1)/2,(z0+z1)/2);};
-    set(0,-.9,.9,SUB_FLOOR,Math.min(bottom,s.surfaceY),-.38,.38);
-    set(1,-.9,-.5,bottom,wetTop,-.38,.38); set(2,.5,.9,bottom,wetTop,-.38,.38);
-    set(3,-.5,.5,bottom,wetTop,-.38,-.2); set(4,-.5,.5,bottom,wetTop,.2,.38);
-    set(5,-.9,.9,top,s.surfaceY,-.38,.38);
-  }};
+  const root=new THREE.Group(),parts=[],moving=[];
+  const make=(id,name,text,offset=[0,0,0],shell=false)=>{const p=assembly(root,id,name,text,offset,shell);parts.push(p);return p;};
+  const motion=part=>{const g=nested(part);moving.push(g);return g;};
+  const basin=make('basin','透明教学水槽','水面是浮沉的参照；艇体运动时镜头保持固定。',[0,-.08,0]);
+  const rim=material('#7494ad',.3,.45),glass=material('#b9ddeb',.03,.3,.045);
+  box(basin.object,[1.84,.04,.80],[0,.10,0],rim);
+  for(const z of [-.39,.39])box(basin.object,[1.84,1.18,.006],[0,.71,z],glass).userData.nonPickable=true;
+  for(const x of [-.91,.91])box(basin.object,[.006,1.18,.78],[x,.71,0],glass).userData.nonPickable=true;
+  const backdrop=box(basin.object,[1.8,1,.002],[0,.62,-.38],new THREE.MeshBasicMaterial({color:'#dfF2fa',transparent:true,opacity:.35,depthWrite:false}));backdrop.userData.connection=true;
+  const surface=new THREE.Group();surface.name='sub-3d-waterline';surface.userData.hideWhenExploded=true;basin.object.add(surface);
+  for(const z of [-.38,.38])box(surface,[1.8,.003,.003],[0,0,z],rim).userData.nonPickable=true;
+  for(const x of [-.9,.9])box(surface,[.003,.003,.76],[x,0,0],rim).userData.nonPickable=true;
+  const hull=make('pressure-hull','透明艇壳','透明圆头艇身包围内部舱室；轮廓、压载舱和空气瓶的位置与剖面一致。',[0,.10,0],true);
+  const hullEnvelope=motion(hull);hullEnvelope.name='sub-displacement-hull';
+  const ballast=make('ballast-tanks','前后压载舱','前后两只压载舱对称进排水，每舱容积16 L；蓝色水位显示充水量。',[0,0,.25],true);
+  const air=make('air-bank','压缩空气瓶与分支管','中央空气瓶经上方管道把空气送入两只压载舱，将水排出艇外。',[0,.20,.12]);
+  const vents=make('vents-and-floods','进排水口','压载舱底部的开口与舱外水连通；箭头显示进水或排水。',[0,-.10,.15]);
+  const sail=make('sail','指挥塔与潜望镜','保留潜水艇的识别结构；薄壁附件的排水量在本教学模型中忽略。',[0,.24,0]);
+  const prop=make('propulsion','螺旋桨与尾轴','尾部螺旋桨用于识别艇体方向，本演示只研究竖直浮沉。',[.20,0,0]);
+  const vessel=buildSubmarineVessel({hull:hullEnvelope,ballast:motion(ballast),air:motion(air),vents:motion(vents),sail:motion(sail),prop:motion(prop)});
+  vessel.shell.userData.nonPickable=true;
+  const teachingPart=make('side-lesson','浮沉侧视教学图','与整体共用艇形、前后压载舱及中央空气瓶的位置。');
+  teachingPart.object.userData.hideWhenExploded=true;teachingPart.object.userData.nonPickable=true;
+  const teaching=createSubmarineTeaching(teachingPart.object),dynamics=createSubmarineDynamics();
+  let lastTime=0,lastBallast=10,waterRate=0;
+  return {root,parts,physicsState:dynamics.state,snapshot:dynamics.snapshot,restore:dynamics.restore,reset:dynamics.reset,seek:dynamics.seek,seekFrom:dynamics.seekFrom,setView:teaching.setView,
+    readout:()=>submarineReadoutState(dynamics.state()||submarineHydrostatics(submarineState().centerY),waterRate),
+    update(t=0,inputs={}){
+      const s=dynamics.update(t,inputs);moving.forEach(g=>g.position.y=s.centerY);
+      if(Number.isFinite(inputs._waterRate))waterRate=inputs._waterRate;
+      else if(t>lastTime)waterRate=(s.ballastKg-lastBallast)/(t-lastTime);
+      else if(t<lastTime)waterRate=0;
+      lastTime=t;lastBallast=s.ballastKg;
+      teaching.update(t,s,waterRate);vessel.update(t,s,waterRate);
+      surface.position.y=s.surfaceY;backdrop.scale.y=s.surfaceY-SUB_FLOOR;backdrop.position.y=(s.surfaceY+SUB_FLOOR)/2;
+    }
+  };
 }
-function submarineReadoutState(s) {
-  return {phaseIndex:s.velocityY>.005?3:s.onBottom||s.velocityY<-.005?2:s.displacedFraction<.999?0:1,title:s.mode,
+function submarineReadoutState(s,waterRate=0) {
+  const neutral=Math.abs(s.netBuoyancyN)<.3&&s.displacedFraction>.999;
+  return {phaseIndex:waterRate<-.02||s.velocityY>.005?3:waterRate>.02||s.onBottom||s.velocityY<-.005?1:neutral?2:0,
+    title:waterRate>.02?'压载舱进水，潜水艇变重':waterRate<-.02?'空气压入舱内，把水排出去':neutral?'重力与浮力平衡，竖直运动逐渐减弱':s.mode,
     text:s.onBottom?'艇已触底；额外重量由底板支承。排出压载水后，浮力超过重量就从底部连续上浮。'
-      :`当前实际排水 ${fmt(s.displacedVolumeM3*1000,1)} L，竖直速度 ${fmt(s.velocityY,2)} m/s（向上为正）；进排压载水改变重量，重力、浮力和水的阻力共同决定浮沉。`,
+      :waterRate>.02?'蓝色箭头表示水流入压载舱；整艇质量增加。完全浸没后，重力大于浮力就会下沉。'
+      :waterRate<-.02?'金色箭头表示压缩空气进入，蓝色箭头表示排水；整艇变轻，浮力大于重力就会上浮。'
+      :neutral?'完全浸没时，重力与浮力大小相等；水的阻力让剩余竖直速度逐渐减小。'
+      :`压载水 ${fmt(s.ballastKg)} kg；浮力 ${fmt(s.buoyancyN,0)} N，重力 ${fmt(s.weightN,0)} N。上浮和下沉由合力与当前速度共同决定。`,
     values:[{label:'压载水质量',value:fmt(s.ballastKg),unit:'kg'},{label:'实际浮力',value:fmt(s.buoyancyN,0),unit:'N'},
       {label:'重力',value:fmt(s.weightN,0),unit:'N'},{label:'浸没比例',value:fmt(s.displacedFraction*100,0),unit:'%'}]};
 }
@@ -241,13 +253,16 @@ function buildCanalLock() {
   const brass=material('#bc9552',.7,.3),glass=material('#a0d2e6',.02,.2,.13),waterMat=material('#3294bf',.02,.2,.30);
   const make=(id,name,text,offset,shell=false)=>{const p=assembly(root,id,name,text,offset,shell);parts.push(p);return p;};
   const stage=make('foundation','透明底板与连续岸壁','透明底板显示地下涵洞；顶面为统一水位基准，近岸透明墙仍高于最高水位。',[0,-.1,0]);
-  volumeBox(stage.object,[2.78,.12,.76],[0,.16,0],material('#9faeb5',.1,.65,.24));
-  for(const z of [-.325,.325]) volumeBox(stage.object,[2.78,.68,.07],[0,.56,z],z>0?glass:concrete);
-  for(const x of [-1.39,1.39]) volumeBox(stage.object,[.02,.68,.58],[x,.56,0],glass);
+  stage.object.userData.explodePrimary=true;
+  volumeBox(stage.object,[2.78,.12,.76],[0,.16,0],material('#9faeb5',.1,.65,.24),'lock-floor');
+  for(const z of [-.325,.325]) volumeBox(stage.object,[2.78,.68,.07],[0,.56,z],z>0?glass:concrete,'lock-bank-wall');
+  for(const x of [-1.39,1.39]) volumeBox(stage.object,[.02,.68,.58],[x,.56,0],glass,'lock-end-wall');
   const pools=make('approach-pools','上游与下游水域','两侧水体一直延伸到门平面，开门等水位时与闸室连续。',[0,.15,0]);
+  pools.object.userData.hideWhenExploded=true;
   const highW=nonPickable(volumeBox(pools.object,[.86,1,.58],[-.96,0,0],waterMat,'lock-high-water'));
   const lowW=nonPickable(volumeBox(pools.object,[.86,1,.58],[.96,0,0],waterMat,'lock-low-water'));
   const chamber=make('chamber','闸室水体','水位变动只发生在两端门关闭时，所有水体共用同一底板高度。',[0,.10,0]);
+  chamber.object.userData.hideWhenExploded=true;
   const chamberW=nonPickable(volumeBox(chamber.object,[1.06,1,.58],[0,0,0],waterMat,'lock-chamber-water'));
   [highW,lowW,chamberW].forEach(m=>m.userData.connection=true);
   const culverts=make('culverts','两条带阀涵洞','充水通路接上游和闸室，泄水通路接闸室和下游；阀板位于各自实际管线上。',[0,-.15,.15]);
@@ -326,7 +341,7 @@ function buildManometer() {
 
   const panel = make('stand-and-scale', '刻度背板与支架', '背板固定U形玻璃管和水槽；刻度以液柱高度差为读数依据。', [0, -0.05, 0]);
   addBox(panel, [1.55, 0.08, 0.46], [0.15, 0.07, 0], board);
-  addBox(panel, [1.45, 1.07, 0.035], [0.15, 0.62, -0.20], board);
+  addBox(panel, [1.45, 1.07, 0.035], [0.15, 0.62, -0.20], board).name='manometer-backboard';
   for (const x of [-0.59, 0.78]) addBox(panel, [0.045, 1.08, 0.06], [x, 0.63, -0.16], steel);
   for (let i = 0; i <= 6; i++) addBox(panel, [0.09 + (i % 2 === 0 ? 0.06 : 0), 0.008, 0.012], [-0.50, 0.33 + i * 0.10, -0.13], steel);
 
@@ -336,9 +351,13 @@ function buildManometer() {
   const bendPath=[];
   for(let i=0;i<=32;i++){const a=Math.PI+i*Math.PI/32;bendPath.push([-.20+.16*Math.cos(a),.32+.16*Math.sin(a),.045]);}
   addPipe(gaugeTube,bendPath,.025,tubeGlass).name='manometer-bend-shell';
-  addPipe(gaugeTube,bendPath,.017,oil).name='manometer-bend-liquid';
+  const bendLiquid=addPipe(gaugeTube,bendPath,.017,oil);bendLiquid.name='manometer-bend-liquid';bendLiquid.userData.connection=true;
   for(const x of [-.36,-.04]) straightTube(gaugeTube.object,.025,.70,[x,.67,.045],tubeGlass);
   ring(gaugeTube.object,.033,.025,.014,[-.04,1.02,.045],brass);
+  // Seal the annulus around the smaller pressure line, retaining its air bore.
+  const rubber=material('#394a53',.02,.72);
+  ring(gaugeTube.object,.025,.009,.032,[-.04,1.018,.045],rubber,'manometer-pressure-stopper');
+  ring(gaugeTube.object,.009,.006,.048,[-.04,1.050,.045],brass,'manometer-pressure-nipple');
   const liquidBottom=.32,liquidMaxHeight=.64;
   const leftLiquidGroup=nested(gaugeTube),rightLiquidGroup=nested(gaugeTube);
   for(const [group,x,name]of [[leftLiquidGroup,-.36,'manometer-left-liquid'],[rightLiquidGroup,-.04,'manometer-right-liquid']]){
@@ -364,7 +383,9 @@ function buildManometer() {
 
   const probe = make('pressure-probe', '密封测压探头', '探头端的隔膜感受水压，经密闭引压管把压力传给U形管；水不会流进测压液。可直接拖动探头改变深度。', [0.20, 0.00, 0.16]);
   probe.drag = { control: 'depth', axis: 'y', scale: -1 };
-  addPipe(probe, [[-0.04, 1.02, 0.045], [0.06, 1.06, 0.045], [0.23, 1.06, 0.045], [0.33, 1.03, 0.045], [0.58, 1.03, 0.045], [0.91, 1.03, 0.045], [0.91, 0.98, 0.045], [0.68, 0.98, 0.045], [0.68, 0.77, 0.045]], 0.012, brass);
+  const pressureHose=addPipe(probe, [[-0.04, 1.050, 0.045], [-0.04, 1.075, 0.045], [-0.04, 1.10, 0.045], [0.02, 1.12, 0.045], [0.23, 1.12, 0.045], [0.33, 1.03, 0.045], [0.58, 1.03, 0.045], [0.91, 1.03, 0.045], [0.91, 0.98, 0.045], [0.68, 0.98, 0.045], [0.68, 0.77, 0.045]], 0.012, rubber);
+  pressureHose.name='manometer-pressure-hose';pressureHose.userData.hideWhenExploded=true;
+  ring(probe.object,.014,.012,.009,[-.04,1.057,.045],steel,'manometer-hose-clamp').userData.hideWhenExploded=true;
   addBox(probe, [0.13, 0.04, 0.09], [0.68, 0.99, 0.045], brass);
   addCylinder(probe, 0.023, 0.034, [0.68, 0.79, 0.045], steel);
   const probeExtension = nested(probe); probeExtension.position.set(0.68, 0.77, 0.045);
@@ -442,15 +463,18 @@ export function pistonPumpState(t = 0, inputs = {}) {
 function buildPistonPump() {
   const root=new THREE.Group(),parts=[];
   const cast=material('#466274',.55,.35),steel=material('#acb8bb',.70,.3),brass=material('#c49a54',.7,.3);
-  const dark=material('#243a46',.5,.4),glass=material('#b8e1ee',.02,.2,.18),water=material('#358cc0',.02,.2,.42);
-  const bright=material('#b5eafa',.02,.2,.95),make=(id,name,text,offset,shell=false)=>{const p=assembly(root,id,name,text,offset,shell);parts.push(p);return p;};
+  const dark=material('#243a46',.5,.4),glass=material('#ffffff',0,.18,.045);
+  const water=new THREE.MeshBasicMaterial({color:'#66c3e3',transparent:true,opacity:.26,depthWrite:false,side:THREE.DoubleSide});
+  const surfaceWater=new THREE.MeshBasicMaterial({color:'#269bc6',transparent:true,opacity:.45,depthWrite:false,side:THREE.DoubleSide});
+  const bright=new THREE.MeshBasicMaterial({color:'#087ac3',toneMapped:false}),make=(id,name,text,offset,shell=false)=>{const p=assembly(root,id,name,text,offset,shell);parts.push(p);return p;};
   const x=-.36,bottom=.59,top=1.45,rodRadius=.008,portR=.022;
-  const frame=make('base-and-reservoir','开放供水槽（长吸水管省略）','供水槽是远端水源示意；吸水管的双斜线表示省略长度，输入吸水高度不由画面短管长度读取。',[0,-.08,0]);
+  const frame=make('base-and-reservoir','开放供水槽','供水槽是远端水源示意；水源提升高度由实验参数设定，不按画面短管长度读取。',[0,-.08,0]);
   boxIn(frame.object,[.85,.08,.65],[0,.08,0],dark);
   volumeBox(frame.object,[.58,.025,.46],[-.12,.17,0],glass);
   for(const z of [-.22,.22])volumeBox(frame.object,[.58,.28,.02],[-.12,.30,z],glass);
   for(const xx of [-.40,.16])volumeBox(frame.object,[.02,.28,.44],[xx,.30,0],glass);
-  nonPickable(volumeBox(frame.object,[.54,.19,.42],[-.12,.2775,0],water,'pump-source-water'));
+  nonPickable(volumeBox(frame.object,[.54,.19,.42],[-.12,.2775,0],water,'pump-source-water')).userData.connection=true;
+  const sourceSurface=nonPickable(volumeBox(frame.object,[.54,.002,.42],[-.12,.3725,0],surfaceWater,'pump-source-surface'));sourceSurface.userData.connection=true;
   const barrel=make('pump-cylinder','透明泵筒、侧出水孔与导向环','内径 0.12 m；筒盖和导向环有杆孔，侧壁出水口位于活塞最高位置之上。',[-.04,.08,0],true);
   straightTube(barrel.object,.06,1.375-bottom,[x,(1.375+bottom)/2,0],glass,'pump-bore-lower');
   straightTube(barrel.object,.06,top-1.425,[x,(top+1.425)/2,0],glass,'pump-bore-upper');
@@ -459,8 +483,8 @@ function buildPistonPump() {
   shell.position.set(x,1.40,0);shell.name='pump-port-wall';barrel.object.add(shell);
   ring(barrel.object,.075,.027,.03,[x,bottom,0],cast,'pump-base-seat');
   ring(barrel.object,.075,rodRadius+.002,.035,[x,top,0],cast,'pump-lid-rod-hole');
-  const pipes=make('suction-and-delivery','吸水管与侧出水弯管','两条管路分别接底座孔和侧孔；浅色粒子沿实际管道中心线走，双斜线仅表示吸水管长度省略。',[.12,-.04,.12]);
-  const pipeGlass=material('#718e9e',.12,.3,.62);
+  const pipes=make('suction-and-delivery','吸水管与侧出水弯管','两条透明管路分别接底座孔和侧孔；蓝色粒子沿实际管道中心线显示流向；透明管壁与内部水体分别显示。',[.12,-.04,.12]);
+  const pipeGlass=material('#ffffff',0,.18,.075);
   const inletPath=[[-.14,.27,0],[-.14,.48,0],[x,.48,0],[x,.60,0]];
   const outletPath=[[x+.06,1.40,0],[-.17,1.40,0],[-.08,1.40,.12],[-.08,1.28,.12]];
   function routedPipe(points,r,name){
@@ -468,7 +492,10 @@ function buildPistonPump() {
     const mesh=new THREE.Mesh(new THREE.TubeGeometry(curve,100,r,16,false),pipeGlass);mesh.name=name;mesh.userData.route=points;pipes.object.add(mesh);return curve;
   }
   const inletCurve=routedPipe(inletPath,.026,'pump-suction-pipe'),outletCurve=routedPipe(outletPath,portR,'pump-outlet-pipe');
-  for(const y of [.407,.433])boxIn(pipes.object,[.09,.008,.008],[-.14,y,.031],dark,[0,0,-.28]);
+  const pipeLiquids=[inletCurve,outletCurve].map((curve,i)=>{
+    const liquid=new THREE.Mesh(new THREE.TubeGeometry(curve,100,i===0?.020:.016,16,false),water);
+    liquid.name=i===0?'pump-suction-water':'pump-outlet-water';liquid.userData.connection=true;pipes.object.add(liquid);return liquid;
+  });
   const valves=make('two-check-valves','底阀与活塞阀瓣','固定底阀在底座真实通孔上；两片活塞阀瓣盖住偏心通孔，开启时有可见水路。',[-.12,-.06,-.15]);
   const foot=nested(valves);foot.position.set(x-.027,.607,0);foot.name='pump-foot-hinge';
   const footFlap=cylIn(foot,.028,.006,[.027,.003,0],steel);footFlap.name='pump-foot-flap';
@@ -476,6 +503,7 @@ function buildPistonPump() {
   cylIn(lowerFluid,.0595,1,[0,.5,0],water).name='pump-lower-liquid';
   const upperFluid=nested(pipes);upperFluid.userData.connection=true;
   ring(upperFluid,.0595,rodRadius,1,[x,.5,0],water,'pump-upper-liquid');
+  const upperSurface=ring(pipes.object,.0595,rodRadius,.002,[x,PUMP_OUTLET_PORT_Y_M,0],surfaceWater,'pump-water-surface');upperSurface.userData.connection=true;
   const piston=make('piston-and-rod-seals','带通孔活塞、密封与活塞杆','活塞有两个真实偏心通孔；周缘密封贴合缸内壁，中央杆不堵阀孔。',[.1,.03,.06]);
   const slider=nested(piston);slider.name='pump-piston-slider';
   const shape=new THREE.Shape();shape.absarc(0,0,.059,0,Math.PI*2,false);
@@ -494,7 +522,8 @@ function buildPistonPump() {
     const flap=cylIn(hinge,.014,.005,[0,.0025,.014],brass);flap.name='pump-piston-flap';flaps.push({hinge,z});
   }
   const drive=make('hand-lever-and-link','后置手柄、支架与滑槽','手柄在滑槽后方转动，销穿入开口；支架也在后方，杆和出水弯管各自留出间隙。',[.05,.20,0]);
-  boxIn(drive.object,[.07,1.55,.07],[.22,.90,-.10],cast);
+  drive.object.userData.explodePrimary=true;
+  boxIn(drive.object,[.07,1.55,.07],[.22,.90,-.10],cast).name='pump-support-column';
   for(const y of [bottom,top])boxIn(drive.object,[.58,.035,.035],[-.07,y,-.09],cast).name='pump-fixed-barrel-bracket';
   cylIn(drive.object,.025,.13,[.22,1.70,-.04],brass,'z');
   const lever=nested(drive);lever.name='pump-lever';lever.position.set(PUMP_PIVOT_X_M,PUMP_PIVOT_Y_M,-.06);
@@ -504,16 +533,18 @@ function buildPistonPump() {
   const flow=nested(pipes);flow.userData.connection=true;
   const inDots=[],transferDots=[],outDots=[];
   for(let i=0;i<5;i++){
-    inDots.push(nonPickable(sphere(flow,.008,[0,0,0],bright)));
-    outDots.push(nonPickable(sphere(flow,.008,[0,0,0],bright)));
-    for(const z of [-.033,.033])transferDots.push({dot:nonPickable(sphere(flow,.006,[0,0,z],bright)),z});
+    inDots.push(nonPickable(sphere(flow,.010,[0,0,0],bright)));
+    outDots.push(nonPickable(sphere(flow,.010,[0,0,0],bright)));
+    for(const z of [-.033,.033])transferDots.push({dot:nonPickable(sphere(flow,.0075,[0,0,z],bright)),z});
   }
+  [...inDots,...outDots,...transferDots.map(item=>item.dot)].forEach(dot=>{dot.userData.flowMarker=true;dot.name='pump-flow-marker';});
   return {root,parts,update(t=0,inputs={}){
     const s=pistonPumpState(t,inputs);lever.rotation.z=s.theta;slider.position.y=s.pistonCenterY;
     foot.rotation.z=s.inletValveOpen?.85:0;
     flaps.forEach(({hinge,z})=>{hinge.position.set(x,s.pistonTopY,z-.014);hinge.rotation.x=s.pistonValveOpen?-.95:0;});
-    lowerFluid.scale.y=s.pistonCenterY-.023-.615;lowerFluid.visible=s.suctionPossible;
-    upperFluid.position.y=s.pistonTopY;upperFluid.scale.y=PUMP_OUTLET_PORT_Y_M-s.pistonTopY;upperFluid.visible=s.suctionPossible;
+    for(const liquid of [...pipeLiquids,upperSurface])liquid.visible=liquid.userData.modelVisible=s.suctionPossible;
+    lowerFluid.scale.y=s.pistonCenterY-.023-.615;lowerFluid.visible=lowerFluid.userData.modelVisible=s.suctionPossible;
+    upperFluid.position.y=s.pistonTopY;upperFluid.scale.y=PUMP_OUTLET_PORT_Y_M-s.pistonTopY;upperFluid.visible=upperFluid.userData.modelVisible=s.suctionPossible;
     inDots.forEach((dot,i)=>{dot.visible=s.inletValveOpen;dot.position.copy(inletCurve.getPointAt(mod1(s.phase*2+i/5)));});
     transferDots.forEach(({dot,z},i)=>{dot.visible=s.pistonValveOpen;dot.position.set(x,s.pistonCenterY-.07+mod1(s.phase*2+i/10)*.14,z);});
     outDots.forEach((dot,i)=>{dot.visible=s.suctionPossible&&s.frequencyHz>0;dot.position.copy(outletCurve.getPointAt(mod1(s.phase*(s.upstroke?2:.15)+i/5)));});
@@ -541,8 +572,8 @@ export const devices = [
     id: 'submarine', name: '潜水艇教学模型', category: 'fluids', timeContinuous: true,
     summary: '调节压载水质量，观察艇体由漂浮、近中性到负浮力下沉。',
     principle: '主压载舱进水会增加艇的总质量；压缩空气把水排出会减轻艇的总质量。浸没后浮力由排开的水重决定。',
-    defaultMode: 'xray',
-    notes: '方形教学艇外包络 1×0.40×0.20 m，排水体积0.080 m³；干重70 kg，海水密度1025 kg/m³。水线按实际几何与外水/压载水守恒计算。运行时按重力、实际浸没浮力和120 N·s/m线性阻力连续积分，压载变化保留位置和速度；触底有支承，排水后可连续上浮。滑杆暂停质量输入不移动艇。回退/跨越30 s时间定位会重置释放状态；未模拟配平、空气压缩、进出水动量和吹除瞬态。开放细附件忽略排水。',
+    defaultMode: 'assembled',viewDirection:[.5,.35,1.6],actions:submarineActions,
+    notes: '整体和侧视剖面共用长1.56 m、高0.20 m的椭圆截面圆头艇身，排水体积0.080 m³；前后两只椭圆柱压载舱各16 L，中央为空气瓶。干重70 kg，海水密度1025 kg/m³，中性压载水12 kg。水面、实际浸没体积及舱内水量按水量守恒计算；艇体按重力、浮力与水阻力连续运动。艇壳透明仅为教学观察，真实艇壳不透明；指挥塔、潜望镜及管路的附加体积忽略。箭头定性表示进排水与空气通路，未计算空气热力过程。调到悬浮先离开水面或底部，再调至12 kg；竖直速度逐渐衰减。',
     sources: [
       { label: 'NAVSEA · 深潜器 Alvin 稳性试验', url: 'https://www.navsea.navy.mil/Media/News/Article/3068901/carderock-engineer-supports-stability-tests-for-deep-submergence-vehicle/' },
       { label: 'NAVSEA · Main Ballast Tank 与吹除操作资料', url: 'https://www.navsea.navy.mil/Portals/103/Documents/SUPSALV/SalvageReports/Submarine%20Salvage%20Manual%201970.pdf' },
@@ -552,8 +583,8 @@ export const devices = [
     ],
     stages: [
       { name: '浮在水面', title: '水面下的排水量与艇重平衡', text: '艇只浸入一部分时，排开水的体积随浸没深度增加，浮力逐渐增大直到与重力平衡。' },
-      { name: '调到中性', title: '压载水接近临界质量', text: '临界状态下，艇重接近完全浸没时的最大浮力。真实潜艇还要用配平舱和操纵面修正姿态与深度。' },
       { name: '继续进水', title: '负浮力使艇下沉', text: '主压载舱水增加质量；当艇已完全浸没，浮力不再随深度增加，超过排水浮力的重量会使艇下沉。' },
+      { name: '调到悬浮', title: '重力与浮力平衡', text: '完全浸没时，压载水为12 kg的教学艇达到中性浮力；剩余竖直速度在水的阻力作用下逐渐减小。' },
       { name: '吹除压载水', title: '压缩空气把水排出舱外', text: '打开吹除管路后，压缩空气进入压载舱并把水向外排；艇的总质量降低，恢复正浮力。' },
     ],
     build: buildSubmarine,
@@ -607,7 +638,7 @@ export const devices = [
     id: 'piston-pump', name: '活塞式抽水机', category: 'fluids',
     summary: '观察上行进水、下行过活塞阀；大气压推动水进入泵筒。',
     principle: '活塞上行使下腔压强降低，大气压把水推过底阀；下行时底阀关闭，水穿过活塞止回阀进入上腔。',
-    notes: '单作用桶式泵，预先灌水；活塞偏心孔、底座孔、杆孔和侧出水孔均为真实开口。后置手柄销沿开口横槽滑动。缸径0.12 m、行程0.343 m；平均理想流量含下行时细杆排水。双斜线省略吸水长管，水源提升高度是等效输入，不按短管读数。无损、无汽化理想上限 p大气/(ρg)，实际允许高度更低；超限显示失水状态。',
+    notes: '单作用桶式泵，预先灌水；活塞偏心孔、底座孔、杆孔和侧出水孔均为真实开口。后置手柄销沿开口横槽滑动。缸径0.12 m、行程0.343 m；平均理想流量含下行时细杆排水。管路采用缩短示意，水源提升高度是等效输入，不按短管读数。水体显示到侧出水口高度，出水口上方保留空气空间；活塞上下腔在灌水后的正常工作中均有水。无损、无汽化理想上限 p大气/(ρg)，实际允许高度更低；超限显示失水状态。',
     sources: [
       { label: 'FAO · Water Lifting Devices: Piston or Bucket Pumps', url: 'https://www.fao.org/4/ah810e/ah810e06.htm' },
       { label: 'Michigan State University · Check Valves and Pumps', url: 'https://www.egr.msu.edu/~lira/supp/steam/pump.htm' },

@@ -34,7 +34,7 @@ function showPreview(node){clearTimeout(hideTimer);if(!livePreviewsEnabled||!nod
  const video=document.createElement('video');previewVideo=video;
  video.muted=true;video.loop=true;video.playsInline=true;video.preload='auto';video.tabIndex=-1;
  video.setAttribute('aria-label',`${d.name}运行动态`);video.setAttribute('disablepictureinpicture','');
- video.src=`./assets/previews/${d.id}.webm?v=front-motion-2`;$('#preview-stage').append(video);
+ video.src=`./assets/previews/${d.id}.webm?v=0.3.0`;$('#preview-stage').append(video);
  video.addEventListener('loadeddata',()=>{if(token!==generation)return;clearTimeout(readyTimer);$('#preview-loading').hidden=true;if(!reduced.matches)video.play().catch(()=>{});},{once:true});
  const unavailable=()=>{if(token!==generation)return;clearTimeout(readyTimer);$('#preview-loading').hidden=false;$('#preview-loading').textContent='预览暂时未载入，可直接进入教具。';};
  video.addEventListener('error',unavailable,{once:true});

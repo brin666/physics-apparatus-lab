@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { devices, submarineState, canalLockState, manometerState, pistonPumpState, createSubmarineDynamics } from './fluids.mjs';
+import {SUB_LAYOUT as S,ellipseFraction,submarineWetVolume} from './submarine-layout.mjs';
 import { THREE } from './kit.mjs';
 import {previewInputs,guidedStart} from './preview-inputs.mjs';
 
@@ -178,20 +179,30 @@ const build = id => devices.find(d=>d.id===id).build();
 const volume = b => Math.max(0,b.max.x-b.min.x)*Math.max(0,b.max.y-b.min.y)*Math.max(0,b.max.z-b.min.z);
 const overlapVolume = (a,b) => volume(a.clone().intersect(b));
 
-test('submarine rendered displacement and tank water conserve total water without wetting the hull interior',()=>{
-  const model=build('submarine');
+function checkSubmarineWater(model,s){
+  let inside=0,count=0;
+  model.root.traverse(m=>{
+    if(m.name!=='sub-tank-water')return;
+    count++;assert.equal(m.material.clippingPlanes.length,1,'tank level clipping survives view changes');
+    const level=m.material.clippingPlanes[0].constant-s.centerY;
+    inside+=S.tankVolume*ellipseFraction(level/S.tankRadiusY);
+  });
+  assert.equal(count,2);close(inside,s.ballastVolumeM3,1e-8);
+  close(inside+s.externalWaterVolumeM3,1.8*.76*(1.08-.12),1e-8);
+  close(model.root.getObjectByName('sub-3d-waterline').position.y,s.surfaceY);
+}
+
+test('rounded submarine geometry and clipped tank water match the displacement model',()=>{
+  const model=build('submarine'),shell=model.root.getObjectByName('sub-transparent-shell');
+  const g=shell.geometry,index=g.index,pos=g.attributes.position,a=new THREE.Vector3(),b=new THREE.Vector3(),c=new THREE.Vector3();let signedVolume=0;
+  for(let i=0;i<index.count;i+=3){a.fromBufferAttribute(pos,index.getX(i));b.fromBufferAttribute(pos,index.getX(i+1));c.fromBufferAttribute(pos,index.getX(i+2));signedVolume+=a.dot(b.cross(c))/6;}
+  close(Math.abs(signedVolume),.08,.0003,'triangulated capsule volume');
   for(const ballast of [0,10,12,16,32])for(const t of [0,.5,2,20]){
     model.update(t,{ballast});const s=model.physicsState();model.root.updateMatrixWorld(true);
-    const hull=new THREE.Box3(new THREE.Vector3(-.5,s.centerY-.1,-.2),new THREE.Vector3(.5,s.centerY+.1,.2));
-    close(volume(hull),.08);assert.ok(hull.min.y>=.12-1e-9,'hull cannot penetrate basin floor');
-    close(.4*Math.max(0,Math.min(s.surfaceY,hull.max.y)-hull.min.y),s.displacedVolumeM3);
-    let outside=0,inside=0;
-    model.root.traverse(m=>{
-      if(m.name.startsWith('sub-water-')&&m.visible){const b=bounds(m);outside+=volume(b);assert.ok(overlapVolume(b,hull)<1e-9,'external water must exclude body volume');assert.ok(b.max.y<=s.surfaceY+1e-8);}
-      if(m.name.startsWith('sub-ballast-')&&m.visible)inside+=volume(bounds(m));
-    });
-    close(inside,s.ballastVolumeM3,1e-8);close(outside,s.externalWaterVolumeM3,1e-8);
-    close(inside+outside,1.8*.76*(1.08-.12),1e-8);
+    const hull=bounds(shell);close(hull.max.x-hull.min.x,S.length,1e-7);close(hull.max.y-hull.min.y,.2,1e-7);
+    assert.ok(hull.min.y>=.12-1e-7,'hull cannot penetrate basin floor');
+    close(submarineWetVolume(s.surfaceY-s.centerY),s.displacedVolumeM3);
+    checkSubmarineWater(model,s);
     if(s.onBottom)close(s.bottomReactionN+s.maxBuoyancyN,s.weightN);
   }
   assert.ok(submarineState(2,{ballast:32}).centerY<submarineState(1,{ballast:32}).centerY);
@@ -236,6 +247,25 @@ test('manometer rendered heights and diaphragm depth obey rho g h at every slide
   for(let i=0;i<=100;i++)close(shell.getPoint(i/100).distanceTo(liquid.getPoint(i/100)),0);
 });
 
+test('manometer pressure inlet seals the annulus while retaining a continuous air bore and open reference arm',()=>{
+  const m=build('manometer');m.update(0,{depth:.2});m.root.updateMatrixWorld(true);
+  const stopper=m.root.getObjectByName('manometer-pressure-stopper'),nipple=m.root.getObjectByName('manometer-pressure-nipple');
+  const ray=new THREE.Raycaster(),down=new THREE.Vector3(0,-1,0);
+  // Rays through the real fitting triangles: air can pass down the central bore,
+  // but cannot escape through the gap between the line and the glass rim.
+  for(let i=0;i<24;i++)for(const radius of [.007,.012,.019,.024]){
+    const a=i*Math.PI/12;ray.set(new THREE.Vector3(-.04+radius*Math.cos(a),1.09,.045+radius*Math.sin(a)),down);
+    assert.ok(ray.intersectObjects([stopper,nipple]).length>0,'annular inlet must be sealed');
+  }
+  ray.set(new THREE.Vector3(-.04,1.09,.045),down);assert.equal(ray.intersectObjects([stopper,nipple]).length,0,'pressure passage stays open');
+  ray.set(new THREE.Vector3(-.36,1.09,.045),down);ray.far=.10;
+  assert.equal(ray.intersectObject(m.root.getObjectByName('manometer-open-mouth')).length,0,'left reference mouth stays open');
+  const hose=m.root.getObjectByName('manometer-pressure-hose'),path=hose.geometry.parameters.path;
+  close(path.getPoint(0).x,-.04);close(path.getPoint(0).z,.045);
+  const nippleBox=bounds(nipple);assert.ok(path.getPoint(0).y>nippleBox.min.y&&path.getPoint(0).y<nippleBox.max.y,'hose overlaps its nipple');
+  const tangent=path.getTangent(0);assert.ok(tangent.y>.999,'hose enters the stopper axially');
+});
+
 test('pump has real valve and rod openings, fluid reaches the outlet, and the linkage remains clear',()=>{
   const model=build('piston-pump'),disk=model.root.getObjectByName('pump-perforated-piston'),lid=model.root.getObjectByName('pump-lid-rod-hole'),seat=model.root.getObjectByName('pump-base-seat');
   const ray=new THREE.Raycaster();
@@ -276,13 +306,8 @@ test('submarine guide integrates continuous buoyancy through complete filling an
     assert.ok(Math.abs(s.centerY-previous.centerY)<.05,`continuous position at t=${t}`);
     const hull=bounds(model.root.getObjectByName('sub-displacement-hull'));
     close((hull.min.y+hull.max.y)/2,s.centerY,1e-7);
-    const envelope=new THREE.Box3(new THREE.Vector3(-.5,s.centerY-.1,-.2),new THREE.Vector3(.5,s.centerY+.1,.2));
-    let outside=0,inside=0;model.root.traverse(m=>{
-      if(m.name.startsWith('sub-water-')&&m.visible){const b=bounds(m);outside+=volume(b);assert.ok(overlapVolume(b,envelope)<1e-9);assert.ok(b.max.y<=s.surfaceY+1e-8);}
-      if(m.name.startsWith('sub-ballast-')&&m.visible)inside+=volume(bounds(m));
-    });
-    close(outside+inside,1.8*.76*(1.08-.12),1e-8);
-    close(s.buoyancyN,1025*9.81*.4*Math.max(0,Math.min(s.surfaceY,s.centerY+.1)-(s.centerY-.1)),1e-7);
+    checkSubmarineWater(model,s);
+    close(s.buoyancyN,1025*9.81*submarineWetVolume(s.surfaceY-s.centerY),1e-7);
     const values=model.readout(t,inputs).values;
     assert.ok(Math.abs(Number(values.find(v=>v.label==='实际浮力').value)-s.buoyancyN)<=.5);
     if(s.onBottom)sawBottom=true;if(s.velocityY>.05)sawRise=true;if(s.displacedFraction<.99)sawPartial=true;

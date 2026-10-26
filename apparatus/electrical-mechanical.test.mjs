@@ -83,7 +83,7 @@ test('induction-hob distinguishes drive and cookware without inventing a tempera
     if (object.geometry?.type === 'CylinderGeometry' && object.geometry.parameters.openEnded) openPanWall = true;
   });
   assert.equal(openPanWall, true, 'pan wall should leave the vessel visibly open');
-  const eddyLoops = scene.parts.find(part => part.id === 'eddy-currents').object.children;
+  const eddyLoops = scene.parts.find(part => part.id === 'eddy-currents').object.children.filter(o=>o.isMesh);
   assert.ok(eddyLoops.every(loop => Math.abs(loop.position.y - .265) < 1e-9), 'eddy-current paths sit on the pan floor');
 });
 
@@ -283,11 +283,11 @@ test('rheostat shoe touches actual winding and active segment ends at that conta
 test('hob rim and eddy paths are horizontal; closed flux paths cross pan inside and return outside coil',()=>{
   const m=byId('induction-hob').build();m.root.updateMatrixWorld(true);
   assert(Math.abs(m.root.getObjectByName('horizontal-pan-rim').rotation.x-Math.PI/2)<1e-12);
-  for(const mesh of m.parts.find(p=>p.id==='eddy-currents').object.children) {
+  for(const mesh of m.parts.find(p=>p.id==='eddy-currents').object.children.filter(o=>o.isMesh)) {
     assert(Math.abs(mesh.rotation.x-Math.PI/2)<1e-12);
     assert(mesh.geometry.parameters.radius<.286);
   }
-  for(const loop of m.parts.find(p=>p.id==='magnetic-field').object.children) {
+  for(const loop of m.parts.find(p=>p.id==='magnetic-field').object.children.filter(o=>o.isMesh)) {
     const path=loop.geometry.parameters.path;assert.equal(path.closed,true);
     assert(path.getPoint(0).distanceTo(path.getPoint(1))<1e-12);
     const cross=[];let prev=path.getPoint(0);

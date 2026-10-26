@@ -134,7 +134,7 @@ function relayPhysics(t, inputs = {}) {
 }
 
 function generatorPhysics(t, inputs = {}) {
-  const rpm = THREE.MathUtils.clamp(safeNumber(inputs, 'rpm', 60), 0, 120);
+  const rpm = THREE.MathUtils.clamp(safeNumber(inputs, 'rpm', 15), 0, 120);
   // Illustrative coil equivalent, not a product specification: N=80, B=.20 T, A=.012 m^2.
   const turns = 80, field = .20, area = .012, loadOhms = 10;
   const omega = 2 * Math.PI * rpm / 60;
@@ -380,15 +380,15 @@ function buildSpeaker() {
     addBolt(basket,[.615*Math.cos(a),.72+.615*Math.sin(a),.207],'z',.012);
   }
   const magnet=add('speaker-magnet','环形磁体与 T 形磁轭','环形铁氧体、后铁板和极柱闭合磁路；顶板内缘与极柱之间形成径向气隙。',[0,0,-.20]);
-  annulus(magnet,.30,.16,.14,[0,.72,-.32],M.darkSteel);
-  cylinder(magnet,.31,.045,[0,.72,-.4125],M.iron,'z');
+  named(annulus(magnet,.30,.16,.14,[0,.72,-.32],M.darkSteel),'speaker-ferrite');
+  named(cylinder(magnet,.31,.045,[0,.72,-.4125],M.iron,'z'),'speaker-back-plate');
   named(cylinder(magnet,.105,.27,[0,.72,-.255],M.iron,'z'),'speaker-pole');
   named(annulus(magnet,.31,.14,.08,[0,.72,-.21],M.steel),'speaker-top-plate');
   const moving=add('speaker-moving-system','纸盆、防尘帽与音圈','空心骨架包围极柱，环绕音圈始终悬浮在环形气隙内，纸盆喉部朝后。',[0,0,.18]);
   const dm=named(new THREE.Group(),'speaker-motion');moving.add(dm);
   const profile=[new THREE.Vector2(.118,-.055),new THREE.Vector2(.52,.18),new THREE.Vector2(.52,.186),new THREE.Vector2(.118,-.049)];
-  const cg=new THREE.LatheGeometry(profile,72);cg.rotateX(Math.PI/2);mesh(dm,cg,M.paper,[0,.72,0]);
-  const cap=sphere(dm,.123,[0,.72,-.045],M.rubber);cap.scale.z=.35;
+  const cg=new THREE.LatheGeometry(profile,72);cg.rotateX(Math.PI/2);const cone=named(mesh(dm,cg,M.paper,[0,.72,0]),'speaker-cone');
+  const cap=named(sphere(dm,.123,[0,.72,-.045],M.rubber),'speaker-dust-cap');cap.scale.z=.35;
   named(annulus(dm,.118,.112,.25,[0,.72,-.175],M.plastic),'speaker-former');
   const vc=named(coil(dm,.125,.13,16,[0,.72,-.21],M.brightCopper,'z'),'speaker-voice-coil');
   const surround=add('speaker-surround','悬边与弹波','两处柔性悬挂的外缘固定、内缘随音圈移动，保持音圈同轴。',[0,0,.08]);
@@ -405,23 +405,117 @@ function buildSpeaker() {
     const points=sign<0?
       [[-.27,.43,-.06],[-.22,.56,-.11],[-.15,.77,-.11],[0,.853,-.11],[0,.853,-.283],[.094,.814,-.283],end]:
       [[.27,.43,-.06],[.21,.50,-.10],[.16,.62,-.10],[.133,.72,-.12],[.133,.72,-.145],end];
-    const lead=conductor(terminals,points,.003,M.copper,`speaker-flex-${sign}`);
+    const lead=conductor(terminals,points,.003,sign<0?M.red:M.blue,`speaker-flex-${sign}`);lead.userData.hideWhenExploded=true;
     flexible.push({lead,points});
   }
   const field=add('speaker-field','径向磁场与轴向力','磁场从中心极柱径向朝外；负环向电流与径向磁场叉乘，得到正轴向力。',[0,0,.08]);
+  field.userData.hideWhenExploded=true;
   for(const a of [0,Math.PI/2,Math.PI,3*Math.PI/2])arrow(field,[.108*Math.cos(a),.72+.108*Math.sin(a),-.16],[Math.cos(a),Math.sin(a),0],.065,0x4097bb);
   const force=arrow(field,[.37,.72,.22],[0,0,1],.14,0xc97a43);
   const current=arrow(field,[.125,.72,-.21],[0,-1,0],.10,0xc94f45);
   label(field,'F',[.41,.83,.25],.06);
-  return {root,parts,update(t,inputs={}) {
+  const physicalMeshes=[];for(const p of parts)if(p.object!==field)p.object.traverse(o=>{if(o.isMesh)physicalMeshes.push(o);});
+  const sectionPlane=new THREE.Plane(v3([1,0,0]),0),sectionGroups=[];
+  const sectionGroup=parent=>{const g=named(new THREE.Group(),`${parent.name}-cut-faces`);g.visible=false;parent.add(g);sectionGroups.push(g);return g;};
+  const magneticSection=sectionGroup(magnet),movingSection=sectionGroup(dm),suspensionSection=sectionGroup(surround),sectionTurns=[];
+  function cutFace(parent,width,height,z,y,color){
+    const o=new THREE.Mesh(new THREE.PlaneGeometry(width,height),new THREE.MeshBasicMaterial({color,side:THREE.DoubleSide}));
+    o.rotation.y=-Math.PI/2;o.position.set(-.001,y,z);o.userData.nonPickable=true;parent.add(o);return o;
+  }
+  for(const sign of [-1,1]){
+    const shape=new THREE.Shape();profile.forEach((p,i)=>shape[i?'lineTo':'moveTo'](p.y,.72+sign*p.x));shape.closePath();
+    const wall=new THREE.Mesh(new THREE.ShapeGeometry(shape),new THREE.MeshBasicMaterial({color:'#bc9667',side:THREE.DoubleSide}));wall.rotation.y=-Math.PI/2;wall.position.x=-.003;wall.userData.nonPickable=true;movingSection.add(wall);
+  }
+  const domePoints=Array.from({length:41},(_,i)=>{const a=-Math.PI/2+i*Math.PI/40;return [-.003,.72+.123*Math.sin(a),-.045+.123*.35*Math.cos(a)];});
+  conductor(movingSection,domePoints,.003,M.rubber,'speaker-cut-dust-profile');
+  const suspensionProfiles=[];
+  for(const [inner,outer,z,amp,color] of [[.52,.60,.18,.009,M.rubber],[.118,.28,-.055,.006,M.paper]])for(const sign of [-1,1]){
+    const points=Array.from({length:33},(_,i)=>{const u=i/32;return [-.003,.72+sign*(inner+(outer-inner)*u),z+amp*Math.sin(u*Math.PI*4)];});
+    const line=conductor(suspensionSection,points,.002,color);suspensionProfiles.push({line,points});
+  }
+  // True central vertical cut: X=0, viewed from -X. Y is vertical and Z is
+  // the speaker axis; the cut faces close the actual magnetic/coil sections.
+  cutFace(magneticSection,.045,.62,-.4125,.72,'#687b8a');
+  cutFace(magneticSection,.27,.21,-.255,.72,'#8596a2');
+  for(const sign of [-1,1]){
+    cutFace(magneticSection,.14,.14,-.32,.72+sign*.23,'#344557');
+    cutFace(magneticSection,.08,.17,-.21,.72+sign*.225,'#94a5b1');
+    cutFace(movingSection,.25,.006,-.175,.72+sign*.115,'#d2dbdf');
+    for(let turn=0;turn<16;turn++){
+      const u=(turn+(sign>0?.75:.25))/16,z=-.275+.13*u;
+      const disc=new THREE.Mesh(new THREE.CircleGeometry(.0038,16),new THREE.ShaderMaterial({side:THREE.DoubleSide,toneMapped:false,
+        uniforms:{strength:{value:0},copper:{value:new THREE.Color('#dc8950')},gold:{value:new THREE.Color('#fff196')}},
+        vertexShader:`void main(){gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
+        fragmentShader:`uniform float strength;uniform vec3 copper,gold;void main(){gl_FragColor=vec4(mix(copper,gold,strength),1.0);
+        #include <colorspace_fragment>
+        }`}));
+      disc.rotation.y=-Math.PI/2;disc.position.set(-.002,.72+sign*.125,z);disc.userData.nonPickable=true;movingSection.add(disc);sectionTurns.push({disc,u});
+    }
+  }
+  const sectionField=sectionGroup(field);
+  for(const sign of [-1,1])arrow(sectionField,[-.018,.72+sign*.106,-.21],[0,sign,0],.032,0x4097bb);
+  const sectionForce=arrow(sectionField,[-.018,.91,-.21],[0,0,1],.11,0xc97a43);
+  const originalField=field.children.filter(o=>o!==sectionField);
+  // One moving gold band around the real winding, plus one on each lead.
+  // Positive path current has +Z force in the outward radial magnetic field.
+  const bands=[];
+  function currentBand(wire,sign,width){
+    const mat=new THREE.ShaderMaterial({transparent:true,depthWrite:false,toneMapped:false,side:THREE.DoubleSide,clipping:true,
+      uniforms:{center:{value:.5},direction:{value:1},strength:{value:0},width:{value:width}},
+      vertexShader:`varying vec2 vUv;
+      #include <clipping_planes_pars_vertex>
+      void main(){vUv=uv;vec4 mvPosition=modelViewMatrix*vec4(position,1.0);gl_Position=projectionMatrix*mvPosition;
+      #include <clipping_planes_vertex>
+      }`,
+      fragmentShader:`varying vec2 vUv;uniform float center,direction,strength,width;
+      #include <clipping_planes_pars_fragment>
+      void main(){
+      #include <clipping_planes_fragment>
+      float d=(vUv.x-center)*direction/width;float a=smoothstep(-1.0,-0.65,d)*(1.0-smoothstep(0.25,0.4,d))*strength;if(a<0.01)discard;
+      gl_FragColor=vec4(mix(vec3(0.95,0.55,0.03),vec3(1.0,0.96,0.55),smoothstep(-0.7,0.2,d)),a);
+      #include <colorspace_fragment>
+      }`});
+    const glow=named(new THREE.Mesh(wire.geometry.clone(),mat),`${wire.name}-current`);glow.userData.nonPickable=true;glow.userData.hideWhenExploded=true;wire.add(glow);bands.push({wire,glow,sign});
+  }
+  currentBand(vc,1,.045);for(let i=0;i<flexible.length;i++)currentBand(flexible[i].lead,i===0?1:-1,.22);
+  let studyMode='assembled';
+  return {root,parts,
+    viewStyle(){return {opacity:1,pale:0};},
+    viewBounds(mode){return mode==='cut'?new THREE.Box3(v3([-.64,-.08,-.44]),v3([.64,1.36,.24])):mode==='xray'?new THREE.Box3(v3([-.34,.35,-.44]),v3([.34,1.08,.10])):null;},
+    setView({mode}){
+      studyMode=mode;const cut=mode==='cut',xray=mode==='xray',focused=cut||xray;
+      base.userData.modelVisible=basket.userData.modelVisible=!focused;
+      terminals.userData.modelVisible=!cut;
+      surround.userData.modelVisible=!xray;
+      for(const o of [cone,cap,su.object,sp.object])o.visible=o.userData.modelVisible=!focused;
+      magnet.getObjectByName('speaker-top-plate').visible=!xray;
+      for(const o of physicalMeshes)o.material.clippingPlanes=cut?[sectionPlane]:null;
+      for(const g of sectionGroups)g.visible=cut;
+      for(const o of originalField)o.visible=!cut;
+      field.userData.modelVisible=focused;
+      for(const {glow} of bands)glow.material.clippingPlanes=cut?[sectionPlane]:null;
+      for(const {lead} of flexible)lead.visible=lead.userData.modelVisible=!cut;
+    },
+    update(t,inputs={}) {
     const s=speakerPhysics(t,inputs);dm.position.z=s.excursion;su.update(s.excursion);sp.update(s.excursion);
+    for(const {line,points} of suspensionProfiles){
+      const path=new THREE.CurvePath();const p=points.map((v,i)=>v3([v[0],v[1],v[2]+s.excursion*(1-i/(points.length-1))]));for(let i=1;i<p.length;i++)path.add(new THREE.LineCurve3(p[i-1],p[i]));
+      line.geometry.dispose();line.geometry=new THREE.TubeGeometry(path,64,.002,6,false);
+    }
     for(const {lead,points} of flexible) {
       const p=points.map((v,i)=>[v[0],v[1],v[2]+s.excursion*Math.min(1,i/2)]);
       const path=new THREE.CurvePath();for(let i=1;i<p.length;i++)path.add(new THREE.LineCurve3(v3(p[i-1]),v3(p[i])));
       lead.geometry.dispose();lead.geometry=new THREE.TubeGeometry(path,64,.003,8,false);lead.userData.path=p;
     }
+    for(const {wire,glow,sign} of bands){
+      if(wire!==vc){glow.geometry.dispose();glow.geometry=wire.geometry.clone();}
+      const u=glow.material.uniforms;u.center.value=.5-sign*.28*Math.cos(s.phase);u.direction.value=sign*Math.sign(s.relativeCurrent);u.strength.value=Math.abs(s.relativeCurrent);
+      glow.visible=glow.userData.modelVisible=Math.abs(s.relativeCurrent)>.001;
+    }
+    for(const {disc,u} of sectionTurns)disc.material.uniforms.strength.value=Math.max(0,1-Math.abs(u-(.5-.28*Math.cos(s.phase)))/.045)*Math.abs(s.relativeCurrent);
+    sectionForce.helper.position.z=-.21+s.excursion;sectionForce.helper.setDirection(v3([0,0,s.direction||1]));sectionForce.group.visible=Math.abs(s.relativeCurrent)>.001;
     force.helper.setDirection(v3([0,0,s.direction||1]));current.helper.setDirection(v3([0,-s.direction||-1,0]));
-    force.group.visible=current.group.visible=Math.abs(s.relativeCurrent)>.001;return s;
+    force.group.visible=current.group.visible=studyMode!=='cut'&&Math.abs(s.relativeCurrent)>.001;return s;
   }};
 }
 
@@ -438,8 +532,8 @@ function buildRelay() {
   annulus(winding,.092,.075,.24,[-.10,.40,0],M.insulator,'y');
   const cw=coil(winding,.10,.23,20,[-.10,.40,0],M.brightCopper);
   for(const y of [.275,.525])annulus(winding,.12,.075,.018,[-.10,y,0],M.insulator,'y');
-  conductor(winding,[[0,.285,0],[.02,.26,.13],[-.46,.20,.24]],.007,M.blue,'relay-A1-wire');
-  conductor(winding,[[0,.515,0],[.05,.53,.17],[-.27,.20,.24]],.007,M.red,'relay-A2-wire');
+  conductor(winding,[[0,.285,0],[.02,.26,.13],[-.46,.20,.24]],.007,M.blue,'relay-A1-wire').userData.hideWhenExploded=true;
+  conductor(winding,[[0,.515,0],[.05,.53,.17],[-.27,.20,.24]],.007,M.red,'relay-A2-wire').userData.hideWhenExploded=true;
   const arm=add('relay-armature','衔铁与绝缘触点座','磁性衔铁绕左侧铰链向下转动，绝缘座携带独立的公共触点。',[0,.14,0]);
   const am=named(new THREE.Group(),'relay-armature-motion');am.position.set(-.40,.66,0);arm.add(am);
   box(am,[.53,.04,.14],[.245,0,0],M.steel);
@@ -465,6 +559,7 @@ function buildRelay() {
     box(terminal,[.10,.05,.10],[x,.175,.24],M.insulator);cylinder(terminal,.023,.035,[x,.21,.24],color);label(terminal,text,[x,.27,.29],.045);
   }
   const common=conductor(terminal,[[.14,.21,.24],[.05,.36,.24],[.09,.682,.10]],.007,M.brass,'relay-common-flex');
+  common.userData.hideWhenExploded=true;
   const cover=add('relay-cover','透明保护罩','透明罩保护机构，可隐藏以检查触点与磁隙。',[0,.25,0],true);
   // Thin walls, not a solid block through all the internals.
   for(const x of [-.57,.72])box(cover,[.008,.62,.47],[x,.48,0],material('#c4dfed',.05,.25,.12));
@@ -482,6 +577,16 @@ function buildRelay() {
 
 function buildGenerator() {
   const {root,parts,add}=moduleRoot();
+  const wireRed=material('#af0920',.08,.32),wireBlue=material('#0644ba',.08,.32);
+  const studyMeshes=[],cutMeshes=[],sectionGroups=[];
+  const sectionPlane=new THREE.Plane(new THREE.Vector3(0,0,-1),0);
+  const cut=o=>{cutMeshes.push(o);return o;};
+  const hideInStudy=o=>{studyMeshes.push(o);return o;};
+  const capGroup=parent=>{const g=new THREE.Group();g.name=`${parent.name}-section-faces`;g.visible=false;parent.add(g);sectionGroups.push(g);return g;};
+  const cap=(parent,width,height,x,y,mat)=>{
+    const o=new THREE.Mesh(new THREE.PlaneGeometry(width,height),mat);
+    o.position.set(x,y,.001);o.userData.nonPickable=true;parent.add(o);return o;
+  };
   const base=add('generator-base','绝缘底座','底座支承磁轭与两端轴承。',[0,-.1,0]);
   box(base,[1.16,.10,.84],[0,.10,0],M.base);
   const yoke=add('generator-yoke','回磁轭','磁轭围住线圈扫掠空间，轴与引线从中央留孔穿过。',[0,0,-.12]);
@@ -489,34 +594,53 @@ function buildGenerator() {
   for(const x of [-.37,.37])box(yoke,[.10,.30,.18],[x,.30,0],M.darkSteel);
   for(const y of [.475,1.105])boredCrossbar(yoke,y);
   const poles=add('generator-poles','定子磁极','N 到 S 的横向磁场穿过转动线圈。',[.12,0,0]);
+  const poleCaps=capGroup(poles);
   for(const sign of [-1,1]) {
-    box(poles,[.08,.47,.43],[sign*.29,.79,0],sign<0?M.blue:M.red);
-    named(box(poles,[.02,.47,.43],[sign*.24,.79,0],M.steel),`generator-pole-${sign}`);
+    cut(box(poles,[.08,.47,.43],[sign*.29,.79,0],sign<0?M.blue:M.red));
+    hideInStudy(named(box(poles,[.02,.47,.43],[sign*.24,.79,0],M.steel),`generator-pole-${sign}`));
+    cap(poleCaps,.08,.47,sign*.29,.79,sign<0?M.blue:M.red);
     label(poles,sign<0?'N':'S',[sign*.29,.80,.24],.09);
   }
-  arrow(poles,[-.18,1.03,.23],[1,0,0],.36,0x4098bd);
+  const field=named(new THREE.Group(),'generator-field-direction');poles.add(field);field.userData.hideWhenExploded=true;
+  arrow(field,[-.18,1.08,.23],[1,0,0],.36,0x4098bd);
   const bearings=add('generator-bearings','上下空心轴承','轴套位于绕组与滑环之外，各自留有真实轴孔。',[0,.1,0]);
   for(const y of [.22,1.16])annulus(bearings,.07,.028,.07,[0,y,0],M.brass,'y');
   for(const x of [-.06,.06])box(bearings,[.025,.07,.09],[x,.18,0],M.darkSteel);
   for(const x of [-.12,.12])beam(bearings,[x,1.105,0],[Math.sign(x)*.055,1.16,0],.025,.025,M.darkSteel);
   const rotor=add('generator-rotor','连续旋转线圈','线圈面积法线初始沿 +Z，绕 +Y 转动后磁通与 sinθ 成正比。',[0,0,-.12]);
   const rm=named(new THREE.Group(),'generator-rotor-motion');rm.position.y=.79;rotor.add(rm);
-  cylinder(rm,.024,1.06,[0,-.02,0],M.steel,'y');
-  box(rm,[.29,.37,.11],[0,0,.08],M.insulator);
-  cylinder(rm,.04,.30,[0,0,0],M.insulator,'y');
-  box(rm,[.22,.28,.08],[0,0,-.085],M.darkSteel);
+  cut(named(cylinder(rm,.024,1.06,[0,-.02,0],M.steel,'y'),'generator-shaft'));
+  hideInStudy(box(rm,[.29,.37,.11],[0,0,.08],M.insulator));
+  hideInStudy(cylinder(rm,.04,.30,[0,0,0],M.insulator,'y'));
+  hideInStudy(box(rm,[.22,.28,.08],[0,0,-.085],M.darkSteel));
+  const shaftCaps=capGroup(rotor);cap(shaftCaps,.048,1.06,0,.77,M.steel).position.z=.003;
   const pts=windingPoints(8,.16,.20,(x,y,z)=>[x,y,z]);
   conductor(rm,pts,.005,M.brightCopper,'generator-winding');
-  conductor(rm,[pts[0],[.16,-.235,.04],[.033,-.27,0],[.033,-.49,0],[.095,-.49,0]],.006,M.red,'generator-start-lead');
-  conductor(rm,[pts.at(-1),[.18,-.235,.06],[-.055,-.27,.06],[-.055,-.41,.06],[-.095,-.41,0]],.006,M.blue,'generator-end-lead');
+  // Leave the winding axially before bending toward the shaft. Bare copper
+  // terminals keep the wider colored jackets outside the winding envelope.
+  const startJoint=[.16,-.232,.04],endJoint=[.16,-.232,.136];
+  const startTerminal=conductor(rm,[pts[0],startJoint],.0045,M.brightCopper,'generator-start-terminal');
+  const endTerminal=conductor(rm,[pts.at(-1),endJoint],.0045,M.brightCopper,'generator-end-terminal');
+  startTerminal.userData.hideWhenExploded=endTerminal.userData.hideWhenExploded=true;
+  const startLead=conductor(rm,[startJoint,[.16,-.25,.04],[.033,-.278,0],[.033,-.455,0],[.065,-.455,0],[.065,-.472,0]],.0048,wireRed,'generator-start-lead');
+  const endLead=conductor(rm,[endJoint,[.16,-.25,.136],[-.055,-.27,.06],[-.055,-.392,.06]],.0048,wireBlue,'generator-end-lead');
+  startLead.userData.hideWhenExploded=endLead.userData.hideWhenExploded=true;
   const rings=add('generator-slip-rings','绝缘滑环与固定电刷','两只连续铜环彼此绝缘，外圆接触固定碳刷，保留交变极性。',[0,0,.12]);
   const ringMotion=named(new THREE.Group(),'generator-ring-motion');ringMotion.position.y=.79;rings.add(ringMotion);
+  const ringCaps=capGroup(rings);
   for(const [index,y] of [[0,-.49],[1,-.41]]) {
-    cylinder(ringMotion,.041,.055,[0,y,0],M.insulator,'y');
-    named(annulus(ringMotion,.095,.041,.036,[0,y,0],index?M.copper:M.brightCopper,'y'),`generator-ring-${index}`);
+    // Actual shaft bore and a separate insulated feed-through for the lower
+    // ring lead. Solid cylinders here previously swallowed the red conductor.
+    const sleeveShape=new THREE.Shape();sleeveShape.absarc(0,0,.041,0,2*Math.PI,false);
+    for(const [x,r] of [[0,.0248],[.033,.0073]]){const hole=new THREE.Path();hole.absarc(x,0,r,0,2*Math.PI,true);sleeveShape.holes.push(hole);}
+    const sleeveGeometry=new THREE.ExtrudeGeometry(sleeveShape,{depth:.055,bevelEnabled:false,curveSegments:48});sleeveGeometry.translate(0,0,-.0275);sleeveGeometry.rotateX(-Math.PI/2);
+    cut(named(mesh(ringMotion,sleeveGeometry,M.insulator,[0,y,0]),`generator-ring-sleeve-${index}`));
+    cut(named(annulus(ringMotion,.095,.041,.036,[0,y,0],index?M.copper:M.brightCopper,'y'),`generator-ring-${index}`));
+    cap(ringCaps,.082,.055,0,.79+y,M.insulator);
+    for(const sign of [-1,1])cap(ringCaps,.054,.036,sign*.068,.79+y,index?M.copper:M.brightCopper);
     named(box(rings,[.07,.025,.025],[.13,.79+y,0],M.darkSteel),`generator-brush-${index}`);
-    box(rings,[.045,.05,.07],[.185,.79+y,0],M.insulator);
-    box(rings,[.04,.79+y-.15,.06],[.19,(.79+y+.15)/2,0],M.insulator);
+    hideInStudy(named(box(rings,[.045,.05,.07],[.185,.79+y,0],M.insulator),`generator-brush-holder-${index}`));
+    hideInStudy(named(box(rings,[.04,.79+y-.15,.06],[.19,(.79+y+.15)/2,0],M.insulator),`generator-brush-stand-${index}`));
   }
   const crank=add('generator-crank','手摇柄','手柄位于上磁轭之上，旋转包络与固定框架分离。',[0,.15,0]);
   const cm=named(new THREE.Group(),'generator-crank-motion');cm.position.y=.79;crank.add(cm);
@@ -525,13 +649,139 @@ function buildGenerator() {
   const out=add('generator-output-circuit','负载与输出端子','两个电刷通过独立导线接到教学电阻，构成闭合负载回路。',[0,0,.15]);
   for(const [i,x] of [[0,.34],[1,.48]]) {
     cylinder(out,.022,.035,[x,.20,.24],i?M.blue:M.red);
-    conductor(out,[[.165,.30+i*.08,0],[.24,.30+i*.08,.16],[x,.20,.24]],.008,i?M.blue:M.red);
+    const wire=conductor(out,[[.145,.30+i*.08,.0125],[.145,.30+i*.08,.09],[.25,.30+i*.08,.18],[x,.20,.24]],.008,i?wireBlue:wireRed,`generator-output-wire-${i}`);wire.userData.hideWhenExploded=true;
   }
   box(out,[.09,.045,.06],[.41,.20,.24],M.paper);
-  conductor(out,[[.34,.20,.24],[.365,.20,.24]],.005,M.copper);
-  conductor(out,[[.455,.20,.24],[.48,.20,.24]],.005,M.copper);
+  conductor(out,[[.34,.20,.24],[.365,.20,.24]],.005,M.copper,'generator-load-wire-0').userData.hideWhenExploded=true;
+  conductor(out,[[.455,.20,.24],[.48,.20,.24]],.005,M.copper,'generator-load-wire-1').userData.hideWhenExploded=true;
   label(out,'10 Ω',[.41,.28,.28],.05);
-  return {root,parts,update(t,inputs={}) {const s=generatorPhysics(t,inputs);rm.rotation.y=ringMotion.rotation.y=cm.rotation.y=s.phase;return s;}};
+  // Flat, open-ended single-turn diagram used only in the longitudinal study
+  // view. The physical winding/lead geometry remains untouched in other modes.
+  function ribbonGeometry(points,radius,existing=null){
+    const vertices=[],uv=[],indices=[],dist=[0];
+    for(let i=1;i<points.length;i++)dist.push(dist.at(-1)+Math.hypot(points[i][0]-points[i-1][0],points[i][1]-points[i-1][1]));
+    for(let i=0;i<points.length;i++){
+      const a=points[Math.max(0,i-1)],b=points[i],c=points[Math.min(points.length-1,i+1)];
+      const before=new THREE.Vector2(b[0]-a[0],b[1]-a[1]).normalize(),after=new THREE.Vector2(c[0]-b[0],c[1]-b[1]).normalize();
+      if(before.lengthSq()<1e-12)before.copy(after);if(after.lengthSq()<1e-12)after.copy(before);
+      if(before.lengthSq()<1e-12){before.set(0,1);after.set(0,1);}
+      const n1=new THREE.Vector2(-before.y,before.x),n2=new THREE.Vector2(-after.y,after.x),n=n1.add(n2).normalize();
+      if(n.lengthSq()<1e-12)n.copy(n2);
+      const miter=radius/Math.max(.35,n.dot(n2));
+      for(const sign of [-1,1]){vertices.push(b[0]+sign*n.x*miter,b[1]+sign*n.y*miter,b[2]||0);uv.push(dist[i]/dist.at(-1),(sign+1)/2);}
+      if(i<points.length-1){const j=2*i;indices.push(j,j+2,j+1,j+1,j+2,j+3);}
+    }
+    if(existing){
+      existing.attributes.position.array.set(vertices);existing.attributes.position.needsUpdate=true;
+      // Keep material-distance UVs: projection must not make the current slide.
+      existing.computeBoundingSphere();return existing;
+    }
+    const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(vertices,3));g.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));g.setIndex(indices);g.computeVertexNormals();return g;
+  }
+  // Orthographic ribbons retain depth solely for real occlusion. They must not
+  // sit on a foreground overlay above the shaft, slip rings and brushes.
+  const flatDiagram=named(new THREE.Group(),'generator-flat-circuit');flatDiagram.visible=false;out.add(flatDiagram);
+  const flatWire=(points,radius,color,name)=>{
+    const wire=named(new THREE.Mesh(ribbonGeometry(points,radius),new THREE.MeshBasicMaterial({color,side:THREE.DoubleSide,toneMapped:false})),name);
+    wire.userData={flatWire:true,path:points,radius,nonPickable:true};flatDiagram.add(wire);return wire;
+  };
+  const flatWinding=flatWire([[.16,.59],[.16,.99],[-.16,.99],[-.16,.59],[.11,.59]],.005,'#c27c42','generator-flat-winding');
+  flatWinding.material.vertexColors=true;flatWinding.material.color.set('#ffffff');
+  flatWinding.geometry.setAttribute('color',new THREE.Float32BufferAttribute(new Float32Array(30).fill(1),3));
+  const flatStart=flatWire([[.16,.59],[.16,.52],[.06,.48],[.06,.30],[.095,.30]],.006,'#c32238','generator-flat-start-lead');
+  const flatEnd=flatWire([[.11,.59],[.04,.54],[-.12,.54],[-.12,.38],[-.095,.38]],.006,'#245bc3','generator-flat-end-lead');
+  const flatOutputs=[0,1].map(i=>flatWire([[.165,.30+i*.08],[.24,.30+i*.08],[i?.48:.34,.20]],.007,i?'#245bc3':'#c32238',`generator-flat-output-wire-${i}`));
+  flatWire([[.34,.20],[.365,.20]],.005,'#c27c42','generator-flat-load-wire-0');
+  flatWire([[.455,.20],[.48,.20]],.005,'#c27c42','generator-flat-load-wire-1');
+  flatWire([[0,.255,.014],[0,1.035,.014]],.010,'#b5bdc3','generator-flat-shaft');
+  const physicalWires=[rm.getObjectByName('generator-winding'),startTerminal,endTerminal,startLead,endLead,...[0,1].flatMap(i=>[out.getObjectByName(`generator-output-wire-${i}`),out.getObjectByName(`generator-load-wire-${i}`)])];
+  // The integral of the same AC current drives every highlight, in both views.
+  // Start/output-0 paths oppose the winding reference; end/output-1 follow it.
+  const currentBands=[];
+  function addCurrentBand(wire,sign){
+    const path=wire.geometry.parameters?.path;
+    const mat=new THREE.ShaderMaterial({transparent:true,depthWrite:false,toneMapped:false,
+      uniforms:{center:{value:.5},direction:{value:1},strength:{value:0}},
+      vertexShader:`varying vec2 vUv;varying vec3 vNormal;
+        void main(){vUv=uv;vNormal=normalize(normalMatrix*normal);gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
+      fragmentShader:`uniform float center;uniform float direction;uniform float strength;
+        varying vec2 vUv;varying vec3 vNormal;
+        void main(){
+          float d=(vUv.x-center)*direction;
+          float band=smoothstep(-0.20,-0.10,d)*(1.0-smoothstep(0.09,0.12,d));
+          float a=band*strength;if(a<0.008)discard;
+          float reflection=pow(max(dot(normalize(vNormal),normalize(vec3(-0.3,0.8,1.0))),0.0),12.0);
+          vec3 gold=mix(vec3(0.94,0.50,0.015),vec3(1.0,0.83,0.16),smoothstep(-0.15,0.08,d));
+          gold=mix(gold,vec3(1.0,0.97,0.69),reflection*0.85);
+          gl_FragColor=vec4(gold,a);
+          #include <colorspace_fragment>
+        }`,
+    });
+    const radius=wire.userData.radius*(wire===startLead||wire===endLead?1.1:1.65);
+    const geometry=wire.userData.flatWire?ribbonGeometry(wire.userData.path,radius):new THREE.TubeGeometry(path,96,radius,8,false);
+    mat.side=THREE.DoubleSide;
+    const highlight=named(new THREE.Mesh(geometry,mat),`${wire.name}-current`);if(wire.userData.flatWire)highlight.position.z=.001;
+    highlight.userData.nonPickable=true;highlight.userData.hideWhenExploded=true;wire.add(highlight);
+    currentBands.push({highlight,sign});
+  }
+  for(const [wire,sign] of [[startLead,-1],[endLead,1],[out.getObjectByName('generator-output-wire-0'),-1],[out.getObjectByName('generator-output-wire-1'),1],[flatStart,-1],[flatEnd,1],[flatOutputs[0],-1],[flatOutputs[1],1],[flatWinding,1]])addCurrentBand(wire,sign);
+  const copperColor=new THREE.Color('#c27c42'),farColor=new THREE.Color('#e2c4a8'),shade=new THREE.Color();
+  function projectFlatRotor(phase){
+    const c=Math.cos(phase),s=Math.sin(phase);
+    for(const wire of [flatWinding,flatStart,flatEnd]){
+      const rest=wire.userData.path;
+      // All internal leads rotate rigidly with the winding, including their
+      // contacts on the continuous rings. The external brushes stay fixed.
+      const points=rest.map(([x,y])=>[x*c,y,-x*s]);
+      ribbonGeometry(points,wire.userData.radius,wire.geometry);
+      const band=wire.getObjectByName(`${wire.name}-current`);
+      if(band)ribbonGeometry(points,wire.userData.radius*1.65,band.geometry);
+    }
+    const rest=flatWinding.userData.path,colors=flatWinding.geometry.attributes.color;
+    for(let i=0;i<rest.length;i++){
+      const depth=-rest[i][0]*s;
+      shade.copy(copperColor).lerp(farColor,(.16-depth)/.32);
+      for(let side=0;side<2;side++)colors.setXYZ(i*2+side,shade.r,shade.g,shade.b);
+    }
+    colors.needsUpdate=true;
+    // Draw far segments first when the projected sides meet edge-on.
+    const order=[0,1,2,3].sort((a,b)=>-(rest[a][0]+rest[a+1][0])*s+(rest[b][0]+rest[b+1][0])*s);
+    const index=flatWinding.geometry.index;
+    order.forEach((segment,i)=>{const j=segment*2;index.array.set([j,j+2,j+1,j+1,j+2,j+3],i*6);});index.needsUpdate=true;
+  }
+  return {root,parts,
+    viewBounds(mode){return ['cut','xray'].includes(mode)?new THREE.Box3(v3([-.36,.15,-.25]),v3([.53,1.32,.30])):null;},
+    viewStyle(o,part,mode){
+      if(mode==='xray'&&part.id==='generator-poles')return {opacity:.18,pale:.8};
+      if(mode==='xray'&&o.name==='generator-shaft')return {opacity:.22,pale:.8};
+      return {opacity:1,pale:0};
+    },
+    setView({mode,planar}){
+      const focused=mode==='cut'||mode==='xray',section=mode==='cut';
+      for(const part of parts)part.object.userData.modelVisible=!(focused&&['generator-base','generator-yoke','generator-bearings','generator-crank'].includes(part.id));
+      for(const mesh of studyMeshes)mesh.visible=mesh.userData.modelVisible=!focused;
+      sectionPlane.constant=.5*(1-planar);
+      for(const mesh of cutMeshes)mesh.material.clippingPlanes=section&&!ringMotion.children.includes(mesh)?[sectionPlane]:null;
+      for(const group of sectionGroups)group.visible=section&&planar>.99;
+      shaftCaps.visible=false;ringCaps.visible=false;
+      const shaft=rm.getObjectByName('generator-shaft');shaft.visible=shaft.userData.modelVisible=!section;
+      flatDiagram.visible=section&&planar>.97;
+      for(const wire of physicalWires)wire.visible=wire.userData.modelVisible=!section;
+    },
+    update(t,inputs={}) {
+      const s=generatorPhysics(t,inputs);rm.rotation.y=ringMotion.rotation.y=cm.rotation.y=s.phase;
+      projectFlatRotor(s.phase);
+      const strength=s.peak>0?Math.abs(s.emf/s.peak):0;
+      for(const {highlight,sign} of currentBands){
+        const u=highlight.material.uniforms;
+        u.center.value=.5-sign*.28*Math.sin(s.phase);
+        u.direction.value=sign*Math.sign(s.current);
+        u.strength.value=strength;
+        highlight.visible=highlight.userData.modelVisible=strength>.008;
+      }
+      return s;
+    }
+  };
 }
 const motorStages = [
   { name: '正向电流', title: '接近零转矩位置', text: '轴向导线受磁场力，转矩沿正转方向；接近四分之一周时准备换向。' },
@@ -590,6 +840,8 @@ export const devices = [
   },
   {
     id: 'speaker', name: '动圈扬声器', category: 'electromagnetic',
+    flatViewDirection:[-1,0,0],instantFlatView:true,
+    viewDescriptions:{cut:'中心纵剖 · 音圈带动纸盆往复运动',xray:'内部观察 · 磁路、音圈与柔性引线'},
     summary: '音频电流驱动音圈在磁隙中往复运动，纸盆推动空气形成声波。',
     principle: '磁隙中的音圈受洛伦兹力 F=BLI；音圈与纸盆相连，弹波和悬边约束轴向运动。',
     notes: '模型展示常见圆锥动圈单元，篮架、磁路、音圈、纸盆、悬边、弹波和引线均有分件。信号幅度为归一化教学输入，纸盆行程被放大为可见的 ±24 mm；演示频率范围远低于音频频带，以便直接观察往复运动。位移采用刚度控制的准静态示意 x=24 mm·level·sin(2πft)，相当于弹性回复力近似平衡电磁驱动力；并非把电磁力直接当成加速度。未计算质量、阻尼或相位滞后，不代表实际扬声器行程或频响。几何是示意比例而非具体产品。',
@@ -649,6 +901,8 @@ export const devices = [
   },
   {
     id: 'generator', name: '手摇交流发电机', category: 'electromagnetic',
+    flatViewDirection:[0,0,1],instantFlatView:true,
+    viewDescriptions:{cut:'纵向剖切 · 线圈转动与交流方向',xray:'透视观察 · 线圈、滑环与电刷'},
     summary: '手柄带动线圈在磁场中转动，磁通变化产生交变电动势。',
     principle: '线圈磁通 Φ=N B A sinθ；依照法拉第定律 e=−dΦ/dt，匀速转动时输出正弦交流电。',
     notes: '可见绕组是少匝示意线圈，读数模型采用 N=80、B=0.20 T、A=0.012 m² 的教学等效参数，二者并不尝试一一对应。读数按 θ=ωt、Epeak=N B Aω、e=−Epeak cosθ、Vrms=Epeak/√2 计算；另以 10 Ω 纯电阻负载示范 I=e/R。参数不是某台发电机的实测规格，忽略线圈电阻、电感、磁场非均匀和机械损耗。手柄转速动画与电压相位使用同一个角度，没有时间缩放。',
@@ -657,7 +911,7 @@ export const devices = [
       { label: 'OpenStax University Physics Volume 2, electric generators and back EMF', url: 'https://openstax.org/books/university-physics-volume-2/pages/13-6-electric-generators-and-back-emf' },
       { label: 'OpenStax University Physics 2, Faraday’s law', url: 'https://openstax.org/books/university-physics-volume-2/pages/13-1-faradays-law' },
     ],
-    controls: [{ id: 'rpm', label: '手柄转速', min: 0, max: 120, step: 1, value: 60, unit: 'rpm' }],
+    controls: [{ id: 'rpm', label: '手柄转速', min: 0, max: 120, step: 1, value: 15, unit: 'rpm' }],
     stages: generatorStages,
     build: buildGenerator,
     phaseRate: inputs => generatorPhysics(0, inputs).omega,
