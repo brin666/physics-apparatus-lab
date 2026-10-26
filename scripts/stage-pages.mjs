@@ -18,5 +18,6 @@ for(const file of ['LICENSE','THIRD_PARTY_NOTICES.md','vendor/MACHINE-LICENSE','
 }
 await mkdir(resolve(output,'assets/previews'),{recursive:true});
 for(const device of catalog)await copyFile(resolve(root,`assets/previews/${device.id}.webm`),resolve(output,`assets/previews/${device.id}.webm`));
+for(const device of catalog)await copyFile(resolve(root,`assets/previews/${device.id}.mp4`),resolve(output,`assets/previews/${device.id}.mp4`));
 await writeFile(resolve(output,'.nojekyll'),'');
 console.log(`Staged ${catalog.length+1} pages, lightweight preview clips and license notices in dist/`);
